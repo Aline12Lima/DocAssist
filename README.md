@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🤖 NLP Portfolio API
+# 🤖 DocAssist
 
 ### API de IA construída do zero: 4 modelos ML, RAG, cache e CI/CD em produção
 
@@ -11,8 +11,8 @@
 ![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=for-the-badge&logo=redis&logoColor=white)
 ![Railway](https://img.shields.io/badge/Railway-Deployed-131415?style=for-the-badge&logo=railway&logoColor=white)
 
-![CI Status](https://github.com/Aline12Lima/nlp-project/actions/workflows/ci.yml/badge.svg)
-![Docker Pulls](https://img.shields.io/docker/pulls/aline12limaai/nlp-portfolio?style=flat-square&logo=docker)
+![CI Status](https://github.com/Aline12Lima/DocAssist/actions/workflows/ci.yml/badge.svg)
+![Docker Pulls](https://img.shields.io/docker/pulls/aline12limaai/docassist?style=flat-square&logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
 ### 🌐 [Testar a API em Produção](https://nlp-project-production-4cc9.up.railway.app/docs)
@@ -22,6 +22,8 @@
 ---
 
 ## 📖 Sobre o projeto
+
+Anteriormente **NLP Portfolio API**. Versão atual: **0.2.0**.
 
 Pipeline completo de processamento de linguagem natural (NLP) construído do zero para portfólio, demonstrando habilidades de **engenharia de ML em produção**. A API integra 4 modelos pré-treinados do HuggingFace, implementa busca semântica (RAG) com ChromaDB, cache inteligente com Redis (18x speedup mensurado), histórico persistente em PostgreSQL, e é entregue via CI/CD completo com deploy automatizado.
 
@@ -83,7 +85,7 @@ curl -X POST https://nlp-project-production-4cc9.up.railway.app/nlp/sentiment \
 ### DevOps & Infraestrutura
 - **[Docker](https://www.docker.com/)** — containerização (multi-stage build)
 - **[Docker Compose](https://docs.docker.com/compose/)** — orquestração local
-- **[Docker Hub](https://hub.docker.com/r/aline12limaai/nlp-portfolio)** — registry de imagens
+- **[Docker Hub](https://hub.docker.com/r/aline12limaai/docassist)** — registry de imagens
 - **[Railway](https://railway.app/)** — deploy em produção
 - **[GitHub Actions](https://github.com/features/actions)** — CI/CD
 - **[Prometheus](https://prometheus.io/)** — métricas
@@ -296,8 +298,8 @@ Bugs reais enfrentados e resolvidos durante o desenvolvimento. Este é o valor d
 
 ```bash
 # 1. Clone o repositório
-git clone https://github.com/Aline12Lima/nlp-project.git
-cd nlp-project
+git clone https://github.com/Aline12Lima/DocAssist.git
+cd DocAssist
 
 # 2. Crie o .env a partir do exemplo
 cp .env.example .env
@@ -328,8 +330,8 @@ docker compose exec api pytest app/tests/ -v
 ### Usando a imagem do Docker Hub (sem clonar)
 
 ```bash
-docker pull aline12limaai/nlp-portfolio:latest
-docker run -p 8000:8000 aline12limaai/nlp-portfolio:latest
+docker pull aline12limaai/docassist:latest
+docker run -p 8000:8000 aline12limaai/docassist:latest
 ```
 
 ---

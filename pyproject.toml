@@ -1,6 +1,6 @@
 [project]
-name = "nlp-portfolio"
-version = "0.1.0"
+name = "docassist"
+version = "0.2.0"
 description = "Pipeline de NLP com FastAPI, HuggingFace e Docker"
 requires-python = ">=3.11"
 

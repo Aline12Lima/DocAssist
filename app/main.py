@@ -17,8 +17,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-API_DESCRIPTION = """
-# NLP Portfolio API
+API_DESCRIPTION = f"""
+# {settings.APP_NAME}
 
 Pipeline completo de processamento de linguagem natural com modelos HuggingFace,
 busca semântica (RAG) e cache inteligente.
@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="NLP Portfolio API",
+    title=settings.APP_NAME,
     description=API_DESCRIPTION,
     version=settings.APP_VERSION,
     openapi_tags=TAGS_METADATA,
@@ -84,7 +84,7 @@ app = FastAPI(
     redoc_url=None,
     contact={
         "name": "Aline Lima",
-        "url": "https://github.com/Aline12Lima/nlp-project",
+        "url": "https://github.com/Aline12Lima/DocAssist",
     },
     license_info={
         "name": "MIT",
@@ -115,7 +115,7 @@ async def custom_redoc():
 def root():
     """Retorna informacoes gerais sobre a API."""
     return {
-        "name": "NLP Portfolio API",
+        "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "docs": "/docs",
         "redoc": "/redoc",

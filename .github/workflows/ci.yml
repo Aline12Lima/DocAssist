@@ -80,7 +80,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: aline12limaai/nlp-portfolio
+          images: aline12limaai/docassist
           tags: |
             type=raw,value=latest
             type=sha,prefix=sha-

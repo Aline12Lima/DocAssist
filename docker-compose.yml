@@ -16,8 +16,10 @@ services:
       - .env
     restart: unless-stopped
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   postgres:
     image: postgres:16-alpine
@@ -31,6 +33,12 @@ services:
       - ./postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nlp_user -d nlp_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     ports:
@@ -39,3 +47,8 @@ services:
       - ./redis_data:/data
     restart: unless-stopped
     command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "____"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

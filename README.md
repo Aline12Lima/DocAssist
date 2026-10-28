@@ -312,6 +312,10 @@ docker compose up --build
 # http://localhost:8000/docs
 ```
 
+O ChromaDB usa `CHROMA_PATH=./chroma_data` e a coleção
+`CHROMA_COLLECTION=documents`, configuráveis no `.env`. No Compose,
+o caminho padrão corresponde ao volume persistente `/app/chroma_data`.
+
 ### Testando
 
 ```bash

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     HF_MODEL_EMBEDDINGS: str = "sentence-transformers/all-MiniLM-L6-v2"
     HF_CACHE_DIR: str = "./models"
 
+    # Banco vetorial
+    CHROMA_PATH: str = "./chroma_data"
+    CHROMA_COLLECTION: str = "documents"
+
     # Banco de dados
     DATABASE_URL: str = "postgresql://nlp_user:nlp_pass@postgres:5432/nlp_db"
 

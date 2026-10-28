@@ -4,6 +4,7 @@ import uuid
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
+from app.config import settings
 from app.models.hf_loader import get_embeddings_model
 
 logger = logging.getLogger(__name__)
@@ -17,10 +18,10 @@ def get_chroma_client():
     if _client is None:
         logger.info("Inicializando ChromaDB...")
         _client = chromadb.PersistentClient(
-            path="/app/chroma_data",
+            path=settings.CHROMA_PATH,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
-        _collection = _client.get_or_create_collection(name="documents")
+        _collection = _client.get_or_create_collection(name=settings.CHROMA_COLLECTION)
         logger.info(f"ChromaDB pronto. Documentos: {_collection.count()}")
     return _collection
 

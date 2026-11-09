@@ -9,7 +9,6 @@ services:
       - ./chroma_data:/app/chroma_data
     environment:
       - HF_HOME=/app/models
-      - TRANSFORMERS_CACHE=/app/models
       - DATABASE_URL=postgresql://nlp_user:nlp_pass@postgres:5432/nlp_db
       - REDIS_URL=redis://redis:6379/0
     env_file:
@@ -48,7 +47,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
     healthcheck:
-      test: ["CMD", "redis-cli", "____"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10

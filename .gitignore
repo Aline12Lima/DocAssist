@@ -10,3 +10,4 @@ redis_data/
 dist/
 *.egg-info/
 Dockerfile.backup
+corpus/raw/

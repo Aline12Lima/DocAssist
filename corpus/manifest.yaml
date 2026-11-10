@@ -1,0 +1,204 @@
+# Corpus do DocAssist — versão 1
+# Os arquivos brutos não são versionados: rode scripts/baixar_corpus.py
+
+# ---------- FastAPI (MIT) ----------
+- id: fastapi-first-steps
+  titulo: "FastAPI — First Steps"
+  fonte: fastapi
+  url: https://fastapi.tiangolo.com/tutorial/first-steps/
+  download: https://raw.githubusercontent.com/fastapi/fastapi/master/docs/en/docs/tutorial/first-steps.md
+  versao: "master"
+  idioma: en
+  licenca: "MIT"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/fastapi/first-steps.md
+
+- id: fastapi-path-params
+  titulo: "FastAPI — Path Parameters"
+  fonte: fastapi
+  url: https://fastapi.tiangolo.com/tutorial/path-params/
+  download: https://raw.githubusercontent.com/fastapi/fastapi/master/docs/en/docs/tutorial/path-params.md
+  versao: "master"
+  idioma: en
+  licenca: "MIT"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/fastapi/path-params.md
+
+- id: fastapi-query-params
+  titulo: "FastAPI — Query Parameters"
+  fonte: fastapi
+  url: https://fastapi.tiangolo.com/tutorial/query-params/
+  download: https://raw.githubusercontent.com/fastapi/fastapi/master/docs/en/docs/tutorial/query-params.md
+  versao: "master"
+  idioma: en
+  licenca: "MIT"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/fastapi/query-params.md
+
+- id: fastapi-body
+  titulo: "FastAPI — Request Body"
+  fonte: fastapi
+  url: https://fastapi.tiangolo.com/tutorial/body/
+  download: https://raw.githubusercontent.com/fastapi/fastapi/master/docs/en/docs/tutorial/body.md
+  versao: "master"
+  idioma: en
+  licenca: "MIT"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/fastapi/body.md
+
+- id: fastapi-dependencies
+  titulo: "FastAPI — Dependencies"
+  fonte: fastapi
+  url: https://fastapi.tiangolo.com/tutorial/dependencies/
+  download: https://raw.githubusercontent.com/fastapi/fastapi/master/docs/en/docs/tutorial/dependencies/index.md
+  versao: "master"
+  idioma: en
+  licenca: "MIT"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/fastapi/dependencies.md
+
+- id: fastapi-testing
+  titulo: "FastAPI — Testing"
+  fonte: fastapi
+  url: https://fastapi.tiangolo.com/tutorial/testing/
+  download: https://raw.githubusercontent.com/fastapi/fastapi/master/docs/en/docs/tutorial/testing.md
+  versao: "master"
+  idioma: en
+  licenca: "MIT"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/fastapi/testing.md
+
+# ---------- Docker Compose (Apache 2.0) ----------
+- id: docker-compose-startup-order
+  titulo: "Docker Compose — Control startup and shutdown order"
+  fonte: docker
+  url: https://docs.docker.com/compose/how-tos/startup-order/
+  download: https://raw.githubusercontent.com/docker/docs/main/content/manuals/compose/how-tos/startup-order.md
+  versao: "compose-v2"
+  idioma: en
+  licenca: "Apache-2.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/docker/startup-order.md
+
+- id: docker-compose-networking
+  titulo: "Docker Compose — Networking"
+  fonte: docker
+  url: https://docs.docker.com/compose/how-tos/networking/
+  download: https://raw.githubusercontent.com/docker/docs/main/content/manuals/compose/how-tos/networking.md
+  versao: "compose-v2"
+  idioma: en
+  licenca: "Apache-2.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/docker/networking.md
+
+- id: docker-compose-project-name
+  titulo: "Docker Compose — Specify a project name"
+  fonte: docker
+  url: https://docs.docker.com/compose/how-tos/project-name/
+  download: https://raw.githubusercontent.com/docker/docs/main/content/manuals/compose/how-tos/project-name.md
+  versao: "compose-v2"
+  idioma: en
+  licenca: "Apache-2.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/docker/project-name.md
+
+- id: docker-compose-env-vars
+  titulo: "Docker Compose — Set environment variables"
+  fonte: docker
+  url: https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/
+  download: https://raw.githubusercontent.com/docker/docs/main/content/manuals/compose/how-tos/environment-variables/set-environment-variables.md
+  versao: "compose-v2"
+  idioma: en
+  licenca: "Apache-2.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/docker/set-environment-variables.md
+
+- id: docker-compose-application-model
+  titulo: "Docker Compose — How Compose works"
+  fonte: docker
+  url: https://docs.docker.com/compose/intro/compose-application-model/
+  download: https://raw.githubusercontent.com/docker/docs/main/content/manuals/compose/intro/compose-application-model.md
+  versao: "compose-v2"
+  idioma: en
+  licenca: "Apache-2.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/docker/compose-application-model.md
+
+# ---------- PostgreSQL (PostgreSQL License) ----------
+- id: postgres-pg-isready
+  titulo: "PostgreSQL 16 — pg_isready"
+  fonte: postgres
+  url: https://www.postgresql.org/docs/16/app-pg-isready.html
+  download: https://www.postgresql.org/docs/16/app-pg-isready.html
+  versao: "16"
+  idioma: en
+  licenca: "PostgreSQL License"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/postgres/app-pg-isready.html
+
+- id: postgres-indexes-intro
+  titulo: "PostgreSQL 16 — Indexes: Introduction"
+  fonte: postgres
+  url: https://www.postgresql.org/docs/16/indexes-intro.html
+  download: https://www.postgresql.org/docs/16/indexes-intro.html
+  versao: "16"
+  idioma: en
+  licenca: "PostgreSQL License"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/postgres/indexes-intro.html
+
+- id: postgres-datatype-character
+  titulo: "PostgreSQL 16 — Character Types"
+  fonte: postgres
+  url: https://www.postgresql.org/docs/16/datatype-character.html
+  download: https://www.postgresql.org/docs/16/datatype-character.html
+  versao: "16"
+  idioma: en
+  licenca: "PostgreSQL License"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/postgres/datatype-character.html
+
+# ---------- Redis (CC BY-NC-SA 4.0) ----------
+- id: redis-expire
+  titulo: "Redis — EXPIRE"
+  fonte: redis
+  url: https://redis.io/docs/latest/commands/expire/
+  download: https://raw.githubusercontent.com/redis/docs/main/content/commands/expire.md
+  versao: "latest"
+  idioma: en
+  licenca: "CC BY-NC-SA 4.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/redis/expire.md
+
+- id: redis-ttl
+  titulo: "Redis — TTL"
+  fonte: redis
+  url: https://redis.io/docs/latest/commands/ttl/
+  download: https://raw.githubusercontent.com/redis/docs/main/content/commands/ttl.md
+  versao: "latest"
+  idioma: en
+  licenca: "CC BY-NC-SA 4.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/redis/ttl.md
+
+- id: redis-data-types
+  titulo: "Redis — Data types"
+  fonte: redis
+  url: https://redis.io/docs/latest/develop/data-types/
+  download: https://raw.githubusercontent.com/redis/docs/main/content/develop/data-types/_index.md
+  versao: "latest"
+  idioma: en
+  licenca: "CC BY-NC-SA 4.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/redis/data-types.md
+
+- id: redis-persistence
+  titulo: "Redis — Persistence"
+  fonte: redis
+  url: https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/
+  download: https://raw.githubusercontent.com/redis/docs/main/content/operate/oss_and_stack/management/persistence.md
+  versao: "latest"
+  idioma: en
+  licenca: "CC BY-NC-SA 4.0"
+  coletado_em: 2026-11-09
+  arquivo: corpus/raw/redis/persistence.md

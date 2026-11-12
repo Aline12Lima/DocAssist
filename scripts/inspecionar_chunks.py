@@ -4,6 +4,7 @@ Uso:
     python -m scripts.inspecionar_chunks                     # resumo do corpus
     python -m scripts.inspecionar_chunks redis-ttl           # mostra os chunks de um documento
     python -m scripts.inspecionar_chunks --limite 200        # testa outro tamanho
+    python -m scripts.inspecionar_chunks --modelo e5small    # conta com o tokenizador do e5
 """
 
 import argparse
@@ -12,14 +13,12 @@ from pathlib import Path
 
 import yaml
 
-from app.config import settings
 from app.services.rag.chunker import gerar_chunks
-from app.services.rag.ingest import criar_contador
+from app.services.rag.embeddings import MODELOS, obter_embedder
 from app.services.rag.parsers import parse_arquivo
 
 MANIFESTO = Path("corpus/manifest.yaml")
 GOLDEN_SET = Path("evals/golden_set.jsonl")
-LIMITE_DO_MODELO = 256
 
 
 def main():
@@ -28,9 +27,12 @@ def main():
     parser.add_argument("--limite", type=int, default=250)
     parser.add_argument("--overlap", type=int, default=30)
     parser.add_argument("--minimo", type=int, default=50)
+    parser.add_argument("--modelo", choices=list(MODELOS), default="minilm")
     args = parser.parse_args()
 
-    contar = criar_contador(settings.HF_MODEL_EMBEDDINGS)
+    embedder = obter_embedder(args.modelo)
+    contar = embedder.contar_tokens
+    limite_do_modelo = embedder.config.max_tokens
     documentos = yaml.safe_load(MANIFESTO.read_text(encoding="utf-8"))
     corpus = {
         doc["id"]: gerar_chunks(
@@ -59,8 +61,8 @@ def main():
         f"| maior {tamanhos[-1]}"
     )
     print(
-        f"Acima do limite do modelo ({LIMITE_DO_MODELO}): "
-        f"{sum(t > LIMITE_DO_MODELO for t in tamanhos)} (blocos de código grandes)"
+        f"Acima do limite do modelo ({limite_do_modelo}): "
+        f"{sum(t > limite_do_modelo for t in tamanhos)} (blocos de código grandes)"
     )
 
     # Cada evidência precisa caber INTEIRA em pelo menos um chunk

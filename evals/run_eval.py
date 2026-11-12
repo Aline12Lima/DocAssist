@@ -1,10 +1,12 @@
 """Avalia a recuperação do DocAssist com o golden set (Recall@k e MRR).
 
-Uso, sempre numa coleção separada da principal:
-    # E0: cada documento inteiro vira um vetor
-    docker compose exec -e CHROMA_COLLECTION=eval_e0 api python -m evals.run_eval --nome E0 --modo documento
-    # E1: documentos divididos em chunks
-    docker compose exec -e CHROMA_COLLECTION=eval_e1 api python -m evals.run_eval --nome E1 --modo chunks
+Cada execução recria a sua própria coleção de avaliação (eval_<modo>_<modelo>),
+com distância cosseno e busca exata. A coleção principal nunca é tocada.
+
+Uso:
+    python -m evals.run_eval --nome E0 --modo documento --modelo minilm
+    python -m evals.run_eval --nome E1 --modo chunks --modelo minilm
+    python -m evals.run_eval --nome E2 --modo chunks --modelo e5small
 """
 
 import argparse
@@ -16,10 +18,9 @@ from pathlib import Path
 
 import yaml
 
-from app.config import settings
-from app.models.hf_loader import get_embeddings_model
-from app.services.chroma_service import add_document, get_chroma_client, search_documents
-from app.services.rag.ingest import criar_contador, ingerir_arquivo
+from app.services.rag.embeddings import MODELOS, obter_embedder
+from app.services.rag.ingest import ingerir_arquivo
+from app.services.rag.vetores import buscar, obter_colecao
 
 GOLDEN_SET = Path("evals/golden_set.jsonl")
 MANIFESTO = Path("corpus/manifest.yaml")
@@ -34,41 +35,45 @@ def normalizar(texto: str, formato: str) -> str:
     return " ".join(texto.split())
 
 
-def limpar_colecao():
-    colecao = get_chroma_client()
-    ids_antigos = colecao.get()["ids"]
-    if ids_antigos:
-        colecao.delete(ids=ids_antigos)
-    return colecao
-
-
-def indexar_documentos_inteiros(documentos: list[dict]) -> int:
-    """E0: cada documento inteiro, sem limpeza, vira um único vetor (o sistema original)."""
+def indexar_documentos_inteiros(documentos: list[dict], colecao, embedder) -> int:
+    """Modo documento (E0): cada arquivo bruto, sem limpeza, vira um único vetor."""
+    textos, metadados = [], []
     for doc in documentos:
         caminho = Path(doc["arquivo"])
+        textos.append(caminho.read_text(encoding="utf-8"))
         formato = "html" if caminho.suffix == ".html" else "md"
-        add_document(caminho.read_text(encoding="utf-8"), {"doc_id": doc["id"], "formato": formato})
+        metadados.append({"doc_id": doc["id"], "formato": formato})
+    colecao.upsert(
+        ids=[doc["id"] for doc in documentos],
+        embeddings=embedder.vetorizar_trechos(textos),
+        documents=textos,
+        metadatas=metadados,
+    )
     return len(documentos)
 
 
-def indexar_chunks(documentos: list[dict], colecao, limite: int, overlap: int, minimo: int) -> int:
-    """E1 em diante: parsers + chunker + ingestão com IDs determinísticos."""
-    modelo = get_embeddings_model()
-    contar = criar_contador(settings.HF_MODEL_EMBEDDINGS)
+def indexar_chunks(documentos: list[dict], colecao, embedder, args) -> int:
+    """Modo chunks (E1 em diante): parsers + chunker + ingestão com IDs determinísticos."""
     total = 0
     for doc in documentos:
         resultado = ingerir_arquivo(
-            Path(doc["arquivo"]), doc["id"], colecao, modelo, contar, doc, limite, overlap, minimo
+            Path(doc["arquivo"]),
+            doc["id"],
+            colecao,
+            embedder,
+            doc,
+            args.limite,
+            args.overlap,
+            args.minimo,
         )
         total += resultado.chunks
     return total
 
 
-def avaliar_pergunta(pergunta: dict) -> dict:
-    resultados = search_documents(pergunta["pergunta"], top_k=TOP_K)
-    textos = [normalizar(r["text"], r["metadata"].get("formato", "texto")) for r in resultados]
-
-    doc_ids = [r["metadata"].get("doc_id") for r in resultados]
+def avaliar_pergunta(pergunta: dict, colecao, embedder) -> dict:
+    resultados = buscar(pergunta["pergunta"], colecao, embedder, k=TOP_K)
+    textos = [normalizar(r["texto"], r["metadados"].get("formato", "texto")) for r in resultados]
+    doc_ids = [r["metadados"].get("doc_id") for r in resultados]
 
     # Para cada evidência, duas posições (1, 2, 3...):
     # - trecho: o primeiro resultado que CONTÉM a frase de evidência;
@@ -87,8 +92,8 @@ def avaliar_pergunta(pergunta: dict) -> dict:
         "deve_responder": pergunta["deve_responder"],
         "posicoes": posicoes,
         "posicoes_doc": posicoes_doc,
-        "top3": [r["metadata"].get("doc_id") for r in resultados[:3]],
-        "distancia_top1": resultados[0]["distance"] if resultados else None,
+        "top3": doc_ids[:3],
+        "distancia_top1": resultados[0]["distancia"] if resultados else None,
     }
 
 
@@ -107,15 +112,23 @@ def media(valores: list) -> float:
     return sum(valores) / len(valores) if valores else 0.0
 
 
-def montar_relatorio(nome, descricao, itens, unidade, resultados, metricas, distancias) -> str:
+def montar_relatorio(args, embedder, colecao_nome, itens, resultados, metricas, distancias):
+    unidade = "documentos" if args.modo == "documento" else "chunks"
+    if args.modo == "documento":
+        configuracao = "documento inteiro"
+    else:
+        configuracao = (
+            f"chunks por seção (limite {args.limite} tokens com prefixo, "
+            f"overlap {args.overlap}, mínimo {args.minimo})"
+        )
     respondiveis = sum(r["deve_responder"] for r in resultados)
     linhas = [
-        f"# Avaliação {nome}",
+        f"# Avaliação {args.nome}",
         "",
         f"- **Data:** {date.today()}",
-        f"- **Configuração:** {descricao}",
-        f"- **Modelo de embedding:** `{settings.HF_MODEL_EMBEDDINGS}`",
-        f"- **Coleção:** `{settings.CHROMA_COLLECTION}` ({itens} {unidade} indexados)",
+        f"- **Configuração:** {configuracao}; só vetorial; distância cosseno; busca exata",
+        f"- **Modelo de embedding:** `{embedder.config.nome}`",
+        f"- **Coleção:** `{colecao_nome}` ({itens} {unidade} indexados)",
         f"- **Perguntas:** {len(resultados)} ({respondiveis} com resposta, "
         f"{len(resultados) - respondiveis} sem resposta)",
         "",
@@ -146,37 +159,30 @@ def montar_relatorio(nome, descricao, itens, unidade, resultados, metricas, dist
 
 def main():
     parser = argparse.ArgumentParser(description="Avalia a recuperação com o golden set.")
-    parser.add_argument("--nome", default="E0")
-    parser.add_argument("--modo", choices=["documento", "chunks"], default="documento")
+    parser.add_argument("--nome", required=True, help="ex.: E0, E1, E2")
+    parser.add_argument("--modo", choices=["documento", "chunks"], default="chunks")
+    parser.add_argument("--modelo", choices=list(MODELOS), default="minilm")
     parser.add_argument("--limite", type=int, default=250, help="tokens por chunk, com o prefixo")
     parser.add_argument("--overlap", type=int, default=30)
     parser.add_argument("--minimo", type=int, default=50)
-    parser.add_argument("--descricao", default=None)
     args = parser.parse_args()
 
-    if settings.CHROMA_COLLECTION == "documents":
-        raise SystemExit("Pare: use uma coleção separada, por exemplo -e CHROMA_COLLECTION=eval_e1")
+    embedder = obter_embedder(args.modelo)
+    colecao_nome = f"eval_{args.modo}_{args.modelo}"
+    colecao = obter_colecao(colecao_nome, recriar=True)  # cada avaliação parte do zero
 
     documentos = yaml.safe_load(MANIFESTO.read_text(encoding="utf-8"))
-    colecao = limpar_colecao()  # cada avaliação parte de uma coleção vazia
-
     if args.modo == "documento":
-        itens, unidade = indexar_documentos_inteiros(documentos), "documentos"
-        descricao = args.descricao or "MiniLM, documento inteiro, só vetorial (distância L2)"
+        itens = indexar_documentos_inteiros(documentos, colecao, embedder)
     else:
-        itens = indexar_chunks(documentos, colecao, args.limite, args.overlap, args.minimo)
-        unidade = "chunks"
-        descricao = args.descricao or (
-            f"MiniLM, chunks por seção (limite {args.limite} tokens com prefixo, "
-            f"overlap {args.overlap}, mínimo {args.minimo}), só vetorial (distância L2)"
-        )
+        itens = indexar_chunks(documentos, colecao, embedder, args)
 
     perguntas = [
         json.loads(linha)
         for linha in GOLDEN_SET.read_text(encoding="utf-8").splitlines()
         if linha.strip()
     ]
-    resultados = [avaliar_pergunta(p) for p in perguntas]
+    resultados = [avaliar_pergunta(p, colecao, embedder) for p in perguntas]
 
     com_resposta = [r for r in resultados if r["deve_responder"]]
     sem_resposta = [r for r in resultados if not r["deve_responder"]]
@@ -193,7 +199,7 @@ def main():
     }
 
     relatorio = montar_relatorio(
-        args.nome, descricao, itens, unidade, resultados, metricas, distancias
+        args, embedder, colecao_nome, itens, resultados, metricas, distancias
     )
     print(relatorio)
 

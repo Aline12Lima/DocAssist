@@ -10,7 +10,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.services.rag.chunker import Chunk, ContadorDeTokens, gerar_chunks
+from app.services.rag.chunker import Chunk, gerar_chunks
 from app.services.rag.parsers import parse_arquivo
 
 CAMPOS_DO_DOCUMENTO = ("titulo", "fonte", "url", "idioma", "versao", "licenca")
@@ -22,15 +22,6 @@ class ResultadoIngestao:
     chunks: int
     gerados: int  # chunks novos ou alterados, que passaram pelo modelo
     removidos: int
-
-
-def criar_contador(nome_modelo: str) -> ContadorDeTokens:
-    """Conta tokens com o tokenizador do próprio modelo de embedding."""
-    from transformers import AutoTokenizer  # importado aqui: só quem ingere precisa dele
-
-    tokenizador = AutoTokenizer.from_pretrained(nome_modelo)
-    tokenizador.model_max_length = 1_000_000  # aqui só contamos; evita o aviso de texto longo
-    return lambda texto: len(tokenizador.encode(texto, add_special_tokens=False))
 
 
 def gerar_chunk_id(doc_id: str, posicao: int) -> str:
@@ -62,16 +53,16 @@ def ingerir_arquivo(
     caminho: Path,
     doc_id: str,
     colecao,
-    modelo,
-    contar: ContadorDeTokens,
+    embedder,
     documento: dict | None = None,
     limite: int = 250,
     overlap: int = 30,
     minimo: int = 50,
 ) -> ResultadoIngestao:
+    """Ingere um arquivo na coleção. O `embedder` gera os vetores e conta os tokens."""
     documento = documento or {}
     secoes = parse_arquivo(caminho, documento.get("titulo"))
-    chunks = gerar_chunks(secoes, contar, limite, overlap, minimo)
+    chunks = gerar_chunks(secoes, embedder.contar_tokens, limite, overlap, minimo)
     ids = [gerar_chunk_id(doc_id, chunk.posicao) for chunk in chunks]
     hashes = [gerar_hash(chunk.texto) for chunk in chunks]
 
@@ -96,7 +87,7 @@ def ingerir_arquivo(
     ]
     if alterados:
         textos = [chunks[i].texto for i in alterados]
-        vetores = modelo.encode(textos, batch_size=32).tolist()
+        vetores = embedder.vetorizar_trechos(textos)
         colecao.upsert(
             ids=[ids[i] for i in alterados],
             embeddings=vetores,

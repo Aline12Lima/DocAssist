@@ -79,7 +79,7 @@ class EmbeddingResponse(BaseModel):
 class DocumentResponse(BaseModel):
     """Confirmação de documento adicionado."""
 
-    id: str = Field(..., description="ID único gerado (UUID)")
+    id: str = Field(..., description="ID do documento")
     text: str = Field(..., description="Texto salvo")
     status: str = Field(default="added", description="Status da operação")
 
@@ -101,3 +101,29 @@ class SearchResponse(BaseModel):
         ..., description="Documentos encontrados, ordenados por similaridade"
     )
     total: int = Field(..., description="Quantidade de resultados retornados")
+
+
+class IngestResponse(BaseModel):
+    """Resultado da ingestão de um arquivo."""
+
+    doc_id: str = Field(..., description="ID do documento na base")
+    chunks: int = Field(..., description="Quantidade de chunks do documento")
+    gerados: int = Field(..., description="Chunks novos ou alterados (passaram pelo modelo)")
+    removidos: int = Field(..., description="Chunks antigos que deixaram de existir")
+    tempo_ms: int = Field(..., description="Tempo total da ingestão")
+
+
+class DocumentoInfo(BaseModel):
+    """Um documento indexado."""
+
+    doc_id: str
+    titulo: str | None = None
+    fonte: str | None = None
+    chunks: int
+
+
+class DocumentosResponse(BaseModel):
+    """Lista de documentos indexados."""
+
+    total: int
+    documentos: list[DocumentoInfo]

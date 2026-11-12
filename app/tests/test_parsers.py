@@ -91,6 +91,14 @@ Use [Pydantic](https://pydantic.dev) with **all** its <dfn title="x">power</dfn>
     assert "> TTL mykey" in secoes[0].texto  # o conteúdo do shortcode fica
 
 
+def test_markdown_preserva_indentacao_dentro_do_codigo():
+    texto = "# Exemplo\n\n```yaml\nservices:\n  web:\n    build: .\n```\n\nTexto   com   espaços."
+    secoes = parse_markdown(texto)
+
+    assert "services:\n  web:\n    build: ." in secoes[0].texto
+    assert "Texto com espaços." in secoes[0].texto  # fora do código, os espaços são limpos
+
+
 def test_markdown_sem_titulos_vira_uma_secao():
     secoes = parse_markdown("Só um parágrafo.", titulo_doc="Nota")
 
@@ -144,6 +152,13 @@ def test_html_mantem_frase_inteira_e_codigo():
     assert "pg_isready is a utility for checking the connection status of a server." in descricao
     assert "# comentário dentro do código" in secoes[1].texto
     assert len(secoes) == 2  # o "#" dentro do <pre> não virou título
+
+
+def test_html_preserva_indentacao_do_pre():
+    pagina = "<html><body><h2>Código</h2><pre>def f():\n    return 1</pre></body></html>"
+    secoes = parse_html(pagina)
+
+    assert "def f():\n    return 1" in secoes[0].texto
 
 
 # ---------------------------------------------------------------------------

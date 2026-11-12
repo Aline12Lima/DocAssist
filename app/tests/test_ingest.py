@@ -1,4 +1,4 @@
-"""Testes da ingestão com uma coleção e um modelo falsos (sem Chroma e sem MiniLM)."""
+"""Testes da ingestão com uma coleção e um embedder falsos (sem Chroma e sem modelo)."""
 
 from pathlib import Path
 
@@ -26,17 +26,18 @@ class ColecaoFalsa:
             del self.registros[i]
 
 
-class ModeloFalso:
+class EmbedderFalso:
+    """Imita o Embedder: conta palavras como tokens e devolve vetores de zeros."""
+
     def __init__(self):
         self.textos_processados = 0
 
-    def encode(self, textos, batch_size=32):
+    def contar_tokens(self, texto: str) -> int:
+        return len(texto.split())
+
+    def vetorizar_trechos(self, textos):
         self.textos_processados += len(textos)
-        return np.zeros((len(textos), 3))
-
-
-def contar_palavras(texto: str) -> int:
-    return len(texto.split())
+        return np.zeros((len(textos), 3)).tolist()
 
 
 def escrever(tmp_path: Path, secoes: int) -> Path:
@@ -46,29 +47,29 @@ def escrever(tmp_path: Path, secoes: int) -> Path:
     return arquivo
 
 
-def ingerir(arquivo, colecao, modelo):
+def ingerir(arquivo, colecao, embedder):
     return ingerir_arquivo(
-        arquivo, "doc-teste", colecao, modelo, contar_palavras, {"titulo": "Documento"}, limite=60
+        arquivo, "doc-teste", colecao, embedder, {"titulo": "Documento"}, limite=60
     )
 
 
 def test_ingerir_duas_vezes_nao_duplica(tmp_path):
-    colecao, modelo = ColecaoFalsa(), ModeloFalso()
+    colecao, embedder = ColecaoFalsa(), EmbedderFalso()
     arquivo = escrever(tmp_path, secoes=4)
 
-    primeira = ingerir(arquivo, colecao, modelo)
-    segunda = ingerir(arquivo, colecao, modelo)
+    primeira = ingerir(arquivo, colecao, embedder)
+    segunda = ingerir(arquivo, colecao, embedder)
 
     assert len(colecao.registros) == primeira.chunks == segunda.chunks
     assert segunda.gerados == 0  # nada mudou: o modelo nem foi chamado de novo
-    assert modelo.textos_processados == primeira.chunks
+    assert embedder.textos_processados == primeira.chunks
 
 
 def test_documento_menor_apaga_chunks_que_sobraram(tmp_path):
-    colecao, modelo = ColecaoFalsa(), ModeloFalso()
-    ingerir(escrever(tmp_path, secoes=5), colecao, modelo)
+    colecao, embedder = ColecaoFalsa(), EmbedderFalso()
+    ingerir(escrever(tmp_path, secoes=5), colecao, embedder)
 
-    resultado = ingerir(escrever(tmp_path, secoes=2), colecao, modelo)
+    resultado = ingerir(escrever(tmp_path, secoes=2), colecao, embedder)
 
     assert resultado.removidos > 0
     assert len(colecao.registros) == resultado.chunks
@@ -80,8 +81,8 @@ def test_ids_sao_deterministicos():
 
 
 def test_metadados_nao_tem_valores_nulos(tmp_path):
-    colecao, modelo = ColecaoFalsa(), ModeloFalso()
-    ingerir(escrever(tmp_path, secoes=2), colecao, modelo)
+    colecao, embedder = ColecaoFalsa(), EmbedderFalso()
+    ingerir(escrever(tmp_path, secoes=2), colecao, embedder)
 
     for registro in colecao.registros.values():
         meta = registro["metadata"]

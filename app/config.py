@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     RAG_CHUNK_MINIMO: int = 50
     RAG_MAX_UPLOAD_MB: int = 10
 
+    # LLM (as chaves ficam só no .env, nunca no código)
+    GROQ_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    LLM_MODELOS: str = "groq:openai/gpt-oss-120b"  # ordem de tentativa, separada por vírgulas
+    LLM_MAX_TOKENS: int = 800
+    LLM_TEMPERATURA: float = 0.1
+    LLM_TIMEOUT: float = 30.0
+
     # Banco de dados
     DATABASE_URL: str = "postgresql://nlp_user:nlp_pass@postgres:5432/nlp_db"
 

@@ -10,7 +10,7 @@ from app.config import settings
 from app.database.connection import engine
 from app.database.models import Base
 from app.routers import cache, health, history, nlp, rag
-from app.services.chroma_service import get_chroma_client
+from app.services.rag.vetores import obter_cliente
 from app.services.redis_service import get_redis_client
 
 logging.basicConfig(level=logging.INFO)
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     logger.info("Tabelas prontas.")
 
     # Modelos carregados sob demanda (lazy) para economizar RAM no startup
-    get_chroma_client()
+    obter_cliente()
     get_redis_client()
     yield
 

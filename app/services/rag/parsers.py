@@ -34,8 +34,21 @@ CERCA_DE_CODIGO = ("```", "~~~")
 
 
 def normalizar_espacos(texto: str) -> str:
-    """Remove espaços no fim das linhas e junta linhas em branco repetidas."""
-    linhas = [re.sub(r"[ \t]+", " ", linha).strip() for linha in texto.splitlines()]
+    """Limpa espaços extras e junta linhas em branco repetidas.
+
+    Dentro de blocos de código, a indentação é mantida: em YAML e Python ela faz parte
+    do significado. Ali só os espaços do fim da linha são removidos.
+    """
+    linhas = []
+    em_codigo = False
+    for linha in texto.splitlines():
+        if linha.strip().startswith(CERCA_DE_CODIGO):
+            em_codigo = not em_codigo
+            linhas.append(linha.strip())
+        elif em_codigo:
+            linhas.append(linha.rstrip())
+        else:
+            linhas.append(re.sub(r"[ \t]+", " ", linha).strip())
     texto = "\n".join(linhas)
     return re.sub(r"\n{3,}", "\n\n", texto).strip()
 

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     CHROMA_PATH: str = "./chroma_data"
     CHROMA_COLLECTION: str = "documents"
 
+    # RAG
+    RAG_EMBEDDING_MODEL: str = "e5small"  # minilm | e5small
+    RAG_CHUNK_LIMITE: int = 250  # tokens por chunk, com o prefixo
+    RAG_CHUNK_OVERLAP: int = 30
+    RAG_CHUNK_MINIMO: int = 50
+    RAG_MAX_UPLOAD_MB: int = 10
+
     # Banco de dados
     DATABASE_URL: str = "postgresql://nlp_user:nlp_pass@postgres:5432/nlp_db"
 

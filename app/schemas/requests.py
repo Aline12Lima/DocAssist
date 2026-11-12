@@ -70,12 +70,14 @@ class SearchRequest(BaseModel):
     top_k: int = Field(
         default=3, ge=1, le=20, description="Quantidade de resultados a retornar (1 a 20)"
     )
+    doc_id: str | None = Field(default=None, description="Buscar só neste documento")
+    fonte: str | None = Field(default=None, description="Buscar só nesta fonte (ex.: docker)")
 
     model_config = {
         "json_schema_extra": {
             "examples": [
-                {"query": "linguagem de programação rápida", "top_k": 3},
-                {"query": "framework web moderno", "top_k": 5},
+                {"query": "como fazer a API esperar o banco ficar pronto?", "top_k": 3},
+                {"query": "o que o TTL retorna?", "top_k": 5, "fonte": "redis"},
             ]
         }
     }

@@ -1,89 +1,185 @@
-from fastapi import APIRouter, HTTPException
+import time
+from pathlib import Path
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+
+from app.config import settings
 from app.schemas.requests import DocumentRequest, SearchRequest
-from app.schemas.responses import DocumentResponse, SearchResponse, SearchResult
-from app.services.chroma_service import add_document, count_documents, search_documents
+from app.schemas.responses import (
+    DocumentoInfo,
+    DocumentosResponse,
+    DocumentResponse,
+    IngestResponse,
+    SearchResponse,
+    SearchResult,
+)
+from app.services.rag.documentos import (
+    EXTENSOES_ACEITAS,
+    colecao_principal,
+    doc_id_de_texto,
+    embedder_principal,
+    gerar_doc_id,
+    ingerir_conteudo,
+    listar_documentos,
+    remover_documento,
+)
+from app.services.rag.vetores import buscar
 
 router = APIRouter()
+
+
+# Dependências: nos testes, são trocadas por uma coleção em memória e um modelo falso.
+def obter_colecao_rag():
+    return colecao_principal()
+
+
+def obter_embedder_rag():
+    return embedder_principal()
+
+
+@router.post(
+    "/ingest",
+    response_model=IngestResponse,
+    summary="Envia um arquivo (PDF, Markdown ou HTML) para a base",
+    responses={
+        413: {"description": "Arquivo acima do limite de tamanho"},
+        415: {"description": "Formato não suportado"},
+        422: {"description": "Nenhum texto encontrado no arquivo"},
+    },
+)
+def ingest(
+    arquivo: UploadFile = File(..., description="Arquivo .pdf, .md ou .html"),
+    doc_id: str | None = Form(None, description="ID do documento (padrão: nome do arquivo)"),
+    titulo: str | None = Form(None, description="Título (padrão: o do próprio arquivo)"),
+    fonte: str | None = Form(None, description="Fonte, para filtrar buscas (ex.: docker)"),
+    colecao=Depends(obter_colecao_rag),
+    embedder=Depends(obter_embedder_rag),
+):
+    """
+    Lê o arquivo, divide em seções e chunks, gera os embeddings e salva na base.
+
+    - **Reenviar o mesmo arquivo não duplica**: os IDs dos chunks vêm do documento e da posição.
+    - **Atualizar um arquivo** substitui os chunks antigos e apaga os que deixaram de existir.
+    - Chunks que não mudaram não passam pelo modelo de novo.
+    """
+    extensao = Path(arquivo.filename or "").suffix.lower()
+    if extensao not in EXTENSOES_ACEITAS:
+        raise HTTPException(status_code=415, detail="Formatos aceitos: PDF, MD, HTML")
+
+    conteudo = arquivo.file.read()
+    if len(conteudo) > settings.RAG_MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=413, detail=f"Limite de {settings.RAG_MAX_UPLOAD_MB} MB por arquivo"
+        )
+
+    doc_id = doc_id or gerar_doc_id(arquivo.filename)
+    inicio = time.perf_counter()
+    resultado = ingerir_conteudo(
+        conteudo, extensao, doc_id, colecao, embedder, {"titulo": titulo, "fonte": fonte}
+    )
+    if resultado.chunks == 0:
+        raise HTTPException(status_code=422, detail="Nenhum texto encontrado no arquivo")
+
+    return IngestResponse(
+        doc_id=doc_id,
+        chunks=resultado.chunks,
+        gerados=resultado.gerados,
+        removidos=resultado.removidos,
+        tempo_ms=int((time.perf_counter() - inicio) * 1000),
+    )
+
+
+@router.get(
+    "/documents",
+    response_model=DocumentosResponse,
+    summary="Lista os documentos da base",
+)
+def list_documents(colecao=Depends(obter_colecao_rag)):
+    """Mostra cada documento indexado, com título, fonte e quantidade de chunks."""
+    documentos = listar_documentos(colecao)
+    return DocumentosResponse(
+        total=len(documentos), documentos=[DocumentoInfo(**d) for d in documentos]
+    )
+
+
+@router.delete(
+    "/documents/{doc_id}",
+    summary="Remove um documento e todos os seus chunks",
+    responses={404: {"description": "Documento não encontrado"}},
+)
+def delete_document(doc_id: str, colecao=Depends(obter_colecao_rag)):
+    removidos = remover_documento(colecao, doc_id)
+    if removidos == 0:
+        raise HTTPException(status_code=404, detail=f"Documento não encontrado: {doc_id}")
+    return {"doc_id": doc_id, "chunks_removidos": removidos}
 
 
 @router.post(
     "/documents",
     response_model=DocumentResponse,
-    summary="Adiciona documento ao banco vetorial",
-    responses={
-        200: {"description": "Documento indexado com sucesso"},
-        500: {"description": "Erro ao gerar embedding ou salvar no ChromaDB"},
-    },
+    summary="Adiciona um texto à base (use /rag/ingest para arquivos)",
+    deprecated=True,
 )
-def add_doc(body: DocumentRequest):
+def add_doc(
+    body: DocumentRequest,
+    colecao=Depends(obter_colecao_rag),
+    embedder=Depends(obter_embedder_rag),
+):
     """
-    Adiciona um documento ao ChromaDB para busca semântica posterior.
-
-    ### Fluxo interno
-    1. Gera embedding de 384 dimensões do texto
-    2. Cria UUID único para o documento
-    3. Persiste vetor + texto + metadados no ChromaDB
-
-    ### Metadados
-    Os metadados são livres — pode ser categoria, autor, data, tags etc.
-    São úteis para filtrar resultados em buscas futuras.
+    Mantido por compatibilidade. O texto é tratado como um pequeno documento Markdown e
+    passa pela mesma ingestão do `/rag/ingest`. Enviar o mesmo texto de novo não duplica.
     """
-    try:
-        doc_id = add_document(body.text, body.metadata)
-        return DocumentResponse(id=doc_id, text=body.text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    doc_id = body.metadata.get("doc_id") or doc_id_de_texto(body.text)
+    documento = {"titulo": body.metadata.get("titulo"), "fonte": body.metadata.get("fonte")}
+    ingerir_conteudo(body.text.encode("utf-8"), ".md", doc_id, colecao, embedder, documento)
+    return DocumentResponse(id=doc_id, text=body.text)
 
 
 @router.post(
     "/search",
     response_model=SearchResponse,
-    summary="Busca documentos por similaridade semântica",
-    responses={
-        200: {"description": "Busca concluída"},
-        500: {"description": "Erro ao processar a query"},
-    },
+    summary="Busca os trechos mais parecidos com a pergunta",
+    responses={409: {"description": "Nenhum documento indexado"}},
 )
-def search(body: SearchRequest):
+def search(
+    body: SearchRequest,
+    colecao=Depends(obter_colecao_rag),
+    embedder=Depends(obter_embedder_rag),
+):
     """
-    Realiza busca por **significado** (não por palavras-chave) usando
-    similaridade de cosseno entre vetores.
+    Busca por **significado** usando o modelo multilíngue: a pergunta pode estar em
+    português mesmo com documentos em inglês.
 
-    ### Como funciona
-    1. Query é transformada em embedding
-    2. ChromaDB calcula distância para todos os documentos indexados
-    3. Retorna os `top_k` mais próximos
-
-    ### Interpretação da distância
-    - **Menor** = mais similar semanticamente
-    - Valores típicos: 0 a 2 (depende da normalização)
-
-    ### Exemplo prático
-    Query: `"linguagem de programação rápida"`
-    Retorna: `"FastAPI é um framework Python moderno"` mesmo sem palavras em comum,
-    porque o **significado** é próximo no espaço vetorial.
+    - **Distância cosseno:** menor = mais parecido.
+    - **Filtros opcionais:** `doc_id` e `fonte` restringem a busca antes da comparação.
     """
-    try:
-        results = search_documents(body.query, body.top_k)
-        return SearchResponse(
-            query=body.query,
-            results=[SearchResult(**r) for r in results],
-            total=len(results),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    if colecao.count() == 0:
+        raise HTTPException(status_code=409, detail="Nenhum documento indexado")
+
+    condicoes = [
+        {campo: valor} for campo, valor in (("doc_id", body.doc_id), ("fonte", body.fonte)) if valor
+    ]
+    filtros = condicoes[0] if len(condicoes) == 1 else ({"$and": condicoes} if condicoes else None)
+
+    resultados = buscar(body.query, colecao, embedder, k=body.top_k, filtros=filtros)
+    return SearchResponse(
+        query=body.query,
+        results=[
+            SearchResult(
+                id=r["id"], text=r["texto"], distance=r["distancia"], metadata=r["metadados"]
+            )
+            for r in resultados
+        ],
+        total=len(resultados),
+    )
 
 
-@router.get(
-    "/stats",
-    summary="Estatísticas do banco vetorial",
-    responses={200: {"description": "Estatísticas retornadas"}},
-)
-def get_stats():
-    """
-    Retorna a quantidade total de documentos indexados no ChromaDB.
-
-    Útil para monitorar o crescimento da base de conhecimento.
-    """
-    return {"total_documents": count_documents()}
+@router.get("/stats", summary="Estatísticas da base")
+def get_stats(colecao=Depends(obter_colecao_rag), embedder=Depends(obter_embedder_rag)):
+    """Coleção em uso, modelo de embedding, quantidade de documentos e de chunks."""
+    return {
+        "colecao": colecao.name,
+        "modelo": embedder.config.nome,
+        "documentos": len(listar_documentos(colecao)),
+        "chunks": colecao.count(),
+    }

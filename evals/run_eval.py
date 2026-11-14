@@ -8,8 +8,10 @@ Uso:
     python -m evals.run_eval --nome E1 --modo chunks --modelo minilm
     python -m evals.run_eval --nome E2 --modo chunks --modelo e5small
     python -m evals.run_eval --nome E3 --modo chunks --modelo e5small --busca hibrida
+    python -m evals.run_eval --nome E4 --modo chunks --modelo e5small --reranker
 
 --busca escolhe como recuperar: vetorial (padrão), lexical (só BM25) ou hibrida (as duas + RRF).
+--reranker reordena os candidatos da busca com um cross-encoder antes de medir.
 """
 
 import argparse
@@ -27,6 +29,7 @@ from app.services.rag.embeddings import MODELOS, obter_embedder
 from app.services.rag.hibrida import buscar_hibrido
 from app.services.rag.ingest import ingerir_arquivo
 from app.services.rag.lexical import IndiceBM25
+from app.services.rag.reranker import obter_reranker
 from app.services.rag.vetores import buscar, obter_colecao
 
 GOLDEN_SET = Path("evals/golden_set.jsonl")
@@ -78,18 +81,22 @@ def indexar_chunks(documentos: list[dict], colecao, embedder, args) -> int:
 
 
 def montar_busca(args, colecao, embedder):
-    """Devolve uma função consulta -> resultados, conforme o --busca escolhido."""
+    """Devolve uma função consulta -> candidatos, conforme o --busca escolhido.
+
+    Sempre pedimos `--candidatos` resultados (na híbrida, a união das duas listas).
+    Sem reranker, medimos os TOP_K primeiros; com reranker, ele escolhe os TOP_K.
+    """
     if args.busca == "vetorial":
-        return partial(buscar, colecao=colecao, embedder=embedder, k=TOP_K)
+        return partial(buscar, colecao=colecao, embedder=embedder, k=args.candidatos)
     indice = IndiceBM25.da_colecao(colecao)
     if args.busca == "lexical":
-        return partial(indice.buscar, k=TOP_K)
+        return partial(indice.buscar, k=args.candidatos)
     return partial(
         buscar_hibrido,
         colecao=colecao,
         embedder=embedder,
         indice=indice,
-        k=TOP_K,
+        k=2 * args.candidatos,  # a união das duas listas inteira
         candidatos=args.candidatos,
         rrf_k=args.rrf_k,
     )
@@ -106,8 +113,20 @@ def descrever_busca(args) -> str:
     )
 
 
-def avaliar_pergunta(pergunta: dict, busca) -> dict:
-    resultados = busca(pergunta["pergunta"])
+def contem_evidencias(pergunta: dict, resultados: list[dict]) -> bool:
+    """Todas as frases de evidência aparecem em algum dos resultados?"""
+    textos = [normalizar(r["texto"], r["metadados"].get("formato", "texto")) for r in resultados]
+    return all(
+        any(" ".join(e["trecho"].split()) in t for t in textos) for e in pergunta["evidencias"]
+    )
+
+
+def avaliar_pergunta(pergunta: dict, busca, reranker=None) -> dict:
+    candidatos = busca(pergunta["pergunta"])
+    if reranker is not None:
+        resultados = reranker.reordenar(pergunta["pergunta"], candidatos, k=TOP_K)
+    else:
+        resultados = candidatos[:TOP_K]
     textos = [normalizar(r["texto"], r["metadados"].get("formato", "texto")) for r in resultados]
     doc_ids = [r["metadados"].get("doc_id") for r in resultados]
 
@@ -133,6 +152,11 @@ def avaliar_pergunta(pergunta: dict, busca) -> dict:
         "distancia_top1": min(
             (r["distancia"] for r in resultados if r.get("distancia") is not None), default=None
         ),
+        # o reranker só consegue subir o que está nos candidatos: este é o "teto" dele
+        "nos_candidatos": contem_evidencias(pergunta, candidatos),
+        "total_candidatos": len(candidatos),
+        "nota_top1": resultados[0].get("pontuacao_reranker") if resultados else None,
+        "tempo_reranker_ms": reranker.ultimo_tempo_ms if reranker is not None else None,
     }
 
 
@@ -177,6 +201,10 @@ def metricas_por_tipo(com_resposta: list[dict]) -> list[str]:
     return linhas + [""]
 
 
+def formatar_nota(valor) -> str:
+    return f"{valor:.2f}" if valor is not None else "—"
+
+
 def montar_relatorio(args, embedder, colecao_nome, itens, resultados, metricas, distancias):
     unidade = "documentos" if args.modo == "documento" else "chunks"
     if args.modo == "documento":
@@ -192,6 +220,7 @@ def montar_relatorio(args, embedder, colecao_nome, itens, resultados, metricas, 
         "",
         f"- **Data:** {date.today()}",
         f"- **Configuração:** {configuracao}; {descrever_busca(args)}",
+        f"- **Reranker:** {reranker_usado(args)}",
         f"- **Modelo de embedding:** `{embedder.config.nome}`",
         f"- **Coleção:** `{colecao_nome}` ({itens} {unidade} indexados)",
         f"- **Perguntas:** {len(resultados)} ({respondiveis} com resposta, "
@@ -209,20 +238,50 @@ def montar_relatorio(args, embedder, colecao_nome, itens, resultados, metricas, 
         f"| {formatar_distancia(distancias['com'])} |",
         f"| Distância média do 1º resultado, perguntas sem resposta "
         f"| {formatar_distancia(distancias['sem'])} |",
+        *linhas_do_reranker(args, resultados),
         "",
         *metricas_por_tipo([r for r in resultados if r["deve_responder"]]),
         "## Por pergunta",
         "",
-        "| id | tipo | posição das evidências | 3 primeiros documentos | distância do 1º |",
-        "| --- | --- | --- | --- | --- |",
+        "| id | tipo | posição das evidências | 3 primeiros documentos | distância do 1º "
+        "| nota do 1º (reranker) |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for r in resultados:
         posicoes = ", ".join(str(p) if p else "—" for p in r["posicoes"]) or "sem evidência"
         linhas.append(
             f"| {r['id']} | {r['tipo']} | {posicoes} | {', '.join(r['top3'])} "
-            f"| {formatar_distancia(r['distancia_top1'])} |"
+            f"| {formatar_distancia(r['distancia_top1'])} | {formatar_nota(r['nota_top1'])} |"
         )
     return "\n".join(linhas) + "\n"
+
+
+def reranker_usado(args) -> str:
+    if not args.reranker:
+        return "nenhum"
+    if args.busca == "hibrida":
+        return f"`{args.modelo_reranker}` sobre a união dos candidatos (até {2 * args.candidatos})"
+    return f"`{args.modelo_reranker}` sobre {args.candidatos} candidatos"
+
+
+def linhas_do_reranker(args, resultados: list[dict]) -> list[str]:
+    com = [r for r in resultados if r["deve_responder"]]
+    sem = [r for r in resultados if not r["deve_responder"]]
+    media_candidatos = media([r["total_candidatos"] for r in resultados])
+    linhas = [
+        f"| Recall nos candidatos (teto; média de {media_candidatos:.0f} candidatos) "
+        f"| {media([r['nos_candidatos'] for r in com]):.2f} |"
+    ]
+    if args.reranker:
+        linhas += [
+            f"| Nota média do 1º (reranker), perguntas com resposta "
+            f"| {formatar_nota(media([r['nota_top1'] for r in com]))} |",
+            f"| Nota média do 1º (reranker), perguntas sem resposta "
+            f"| {formatar_nota(media([r['nota_top1'] for r in sem]))} |",
+            f"| Tempo médio do reranker por pergunta (ms) "
+            f"| {media([r['tempo_reranker_ms'] for r in resultados]):.0f} |",
+        ]
+    return linhas
 
 
 def main():
@@ -236,6 +295,8 @@ def main():
     parser.add_argument("--busca", choices=["vetorial", "lexical", "hibrida"], default="vetorial")
     parser.add_argument("--candidatos", type=int, default=30, help="por busca, antes do RRF")
     parser.add_argument("--rrf-k", type=int, default=60)
+    parser.add_argument("--reranker", action="store_true", help="reordena com cross-encoder")
+    parser.add_argument("--modelo-reranker", default=None, help="padrão: o do reranker.py")
     args = parser.parse_args()
 
     embedder = obter_embedder(args.modelo)
@@ -254,7 +315,14 @@ def main():
         if linha.strip()
     ]
     busca = montar_busca(args, colecao, embedder)
-    resultados = [avaliar_pergunta(p, busca) for p in perguntas]
+    reranker = None
+    if args.reranker:
+        reranker = (
+            obter_reranker(args.modelo_reranker) if args.modelo_reranker else obter_reranker()
+        )
+        args.modelo_reranker = reranker.nome
+        reranker.reordenar("aquecimento", [{"texto": "aquecimento"}], k=1)  # baixa/carrega antes
+    resultados = [avaliar_pergunta(p, busca, reranker) for p in perguntas]
 
     com_resposta = [r for r in resultados if r["deve_responder"]]
     sem_resposta = [r for r in resultados if not r["deve_responder"]]

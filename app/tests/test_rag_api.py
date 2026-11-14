@@ -1,18 +1,15 @@
 """Testes dos endpoints do RAG com um Chroma em memória e um modelo falso."""
 
-import hashlib
-
 import chromadb
-import numpy as np
 import pytest
 from chromadb.config import Settings as ChromaSettings
 from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.main import app
-from app.routers.rag import obter_colecao_rag, obter_embedder_rag
-from app.services.rag.embeddings import MODELOS
+from app.routers.rag import obter_colecao_rag, obter_embedder_rag, obter_llm_rag
 from app.services.rag.vetores import obter_colecao
+from app.tests.fakes import EmbedderFalso, LLMFalso
 
 MARKDOWN = b"""# Guia do Redis
 
@@ -26,34 +23,13 @@ RDB persistence performs point-in-time snapshots of your dataset at specified in
 """
 
 
-class EmbedderFalso:
-    """Vetor = contagem de palavras em 32 posições. Textos com palavras em comum ficam perto."""
-
-    config = MODELOS["e5small"]
-
-    def _vetor(self, texto: str) -> list[float]:
-        vetor = np.zeros(32)
-        for palavra in texto.lower().split():
-            vetor[int(hashlib.md5(palavra.encode()).hexdigest(), 16) % 32] += 1
-        norma = np.linalg.norm(vetor)
-        return (vetor / norma if norma else vetor).tolist()
-
-    def contar_tokens(self, texto: str) -> int:
-        return len(texto.split())
-
-    def vetorizar_trechos(self, textos):
-        return [self._vetor(t) for t in textos]
-
-    def vetorizar_consulta(self, texto):
-        return self._vetor(texto)
-
-
 @pytest.fixture
 def cliente():
     chroma = chromadb.EphemeralClient(ChromaSettings(anonymized_telemetry=False))
     colecao = obter_colecao("docs_teste_api", recriar=True, cliente=chroma)
     app.dependency_overrides[obter_colecao_rag] = lambda: colecao
     app.dependency_overrides[obter_embedder_rag] = lambda: EmbedderFalso()
+    app.dependency_overrides[obter_llm_rag] = lambda: LLMFalso("Ela é apagada após o timeout [1].")
     yield TestClient(app)
     app.dependency_overrides.clear()
     chroma.delete_collection("docs_teste_api")
@@ -144,3 +120,24 @@ def test_documents_antigo_ingere_texto_sem_duplicar(cliente):
     assert primeira["id"] == segunda["id"]
     assert primeira["id"].startswith("texto-")
     assert cliente.get("/rag/stats").json()["documentos"] == 1
+
+
+def test_ask_responde_com_citacoes(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente, doc_id="guia-redis", fonte="redis")
+
+    resposta = cliente.post("/rag/ask", json={"pergunta": "key deleted after timeout expired"})
+
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["encontrou_resposta"] is True
+    assert corpo["resposta"] == "Ela é apagada após o timeout [1]."
+    assert corpo["citacoes"][0]["n"] == 1
+    assert corpo["citacoes"][0]["doc_id"] == "guia-redis"
+    assert corpo["meta"]["prompt_version"] == "answer_v1"
+
+
+def test_ask_com_base_vazia_responde_409(cliente):
+    resposta = cliente.post("/rag/ask", json={"pergunta": "qualquer coisa"})
+
+    assert resposta.status_code == 409

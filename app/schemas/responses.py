@@ -127,3 +127,40 @@ class DocumentosResponse(BaseModel):
 
     total: int
     documentos: list[DocumentoInfo]
+
+
+class Citacao(BaseModel):
+    """Um trecho citado na resposta como [n]."""
+
+    n: int = Field(..., description="Número usado na resposta, como em [1]")
+    doc_id: str | None = None
+    titulo: str | None = None
+    secao: str | None = Field(None, description="Documento › Seção")
+    pagina: int | None = None
+    url: str | None = Field(None, description="Página original")
+    trecho: str = Field(..., description="Texto exato enviado ao LLM")
+    distancia: float = Field(..., description="Distância cosseno (menor = mais parecido)")
+
+
+class MetaResposta(BaseModel):
+    """Como a resposta foi gerada."""
+
+    modelo: str | None = Field(None, description="Modelo que respondeu (provedor:modelo)")
+    prompt_version: str
+    tokens_entrada: int
+    tokens_saida: int
+    tentativas: int = Field(..., description="Chamadas ao LLM (2 = precisou reforçar as citações)")
+    citacoes_invalidas: list[int]
+    distancia_top1: float | None = None
+    latencia_ms: int
+
+
+class AskResponse(BaseModel):
+    """Resposta fundamentada nos documentos, com as fontes."""
+
+    pergunta: str
+    resposta: str
+    encontrou_resposta: bool
+    citacoes: list[Citacao]
+    aviso: str | None = None
+    meta: MetaResposta

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     RAG_CHUNK_OVERLAP: int = 30
     RAG_CHUNK_MINIMO: int = 50
     RAG_MAX_UPLOAD_MB: int = 10
+    RAG_TOP_K_CONTEXTO: int = 5  # trechos enviados ao LLM
+    # Acima desta distância, responde "não encontrei" sem chamar o LLM.
+    # Calibrado no E2 para o e5; outro modelo de embedding precisa de outro valor.
+    RAG_LIMIAR_DISTANCIA: float = 0.17
 
     # LLM (as chaves ficam só no .env, nunca no código)
     GROQ_API_KEY: str = ""

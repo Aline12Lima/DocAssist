@@ -10,6 +10,7 @@ from app.config import settings
 from app.database.connection import engine
 from app.database.models import Base
 from app.routers import cache, health, history, nlp, rag
+from app.services.rag.documentos import embedder_principal
 from app.services.rag.vetores import obter_cliente
 from app.services.redis_service import get_redis_client
 
@@ -69,9 +70,15 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("Tabelas prontas.")
 
-    # Modelos carregados sob demanda (lazy) para economizar RAM no startup
+    # Os modelos de NLP são carregados sob demanda (lazy) para economizar RAM no startup
     obter_cliente()
     get_redis_client()
+
+    # O modelo de embedding do RAG é carregado agora: sem isso, a 1ª pergunta leva 10+ s
+    if settings.RAG_AQUECER_MODELO:
+        logger.info("Carregando o modelo de embedding do RAG...")
+        embedder_principal().vetorizar_consulta("aquecimento")
+        logger.info("Modelo de embedding pronto.")
     yield
 
 

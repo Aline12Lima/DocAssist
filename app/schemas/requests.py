@@ -81,3 +81,25 @@ class SearchRequest(BaseModel):
             ]
         }
     }
+
+
+class AskRequest(BaseModel):
+    """Pergunta para o assistente responder com base nos documentos."""
+
+    pergunta: str = Field(
+        ..., min_length=1, max_length=1000, description="A pergunta, em português"
+    )
+    top_k: int | None = Field(
+        default=None, ge=1, le=10, description="Trechos enviados ao LLM (padrão: 5)"
+    )
+    doc_id: str | None = Field(default=None, description="Responder só com este documento")
+    fonte: str | None = Field(default=None, description="Responder só com esta fonte (ex.: docker)")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {"pergunta": "Como faço a API esperar o Postgres ficar pronto no docker compose?"},
+                {"pergunta": "O que o comando TTL retorna?", "fonte": "redis"},
+            ]
+        }
+    }

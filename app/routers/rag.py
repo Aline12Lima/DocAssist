@@ -1,11 +1,13 @@
 import time
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.config import settings
-from app.schemas.requests import DocumentRequest, SearchRequest
+from app.schemas.requests import AskRequest, DocumentRequest, SearchRequest
 from app.schemas.responses import (
+    AskResponse,
     DocumentoInfo,
     DocumentosResponse,
     DocumentResponse,
@@ -13,6 +15,7 @@ from app.schemas.responses import (
     SearchResponse,
     SearchResult,
 )
+from app.services.llm.cadeia import criar_cadeia
 from app.services.rag.documentos import (
     EXTENSOES_ACEITAS,
     colecao_principal,
@@ -23,6 +26,7 @@ from app.services.rag.documentos import (
     listar_documentos,
     remover_documento,
 )
+from app.services.rag.pipeline import responder
 from app.services.rag.vetores import buscar
 
 router = APIRouter()
@@ -35,6 +39,52 @@ def obter_colecao_rag():
 
 def obter_embedder_rag():
     return embedder_principal()
+
+
+@lru_cache
+def _cadeia_de_llm():
+    return criar_cadeia()
+
+
+def obter_llm_rag():
+    """A cadeia de LLM do .env; None se nenhuma chave estiver configurada."""
+    try:
+        return _cadeia_de_llm()
+    except ValueError:
+        return None
+
+
+def montar_filtros(doc_id: str | None, fonte: str | None) -> dict | None:
+    condicoes = [{campo: valor} for campo, valor in (("doc_id", doc_id), ("fonte", fonte)) if valor]
+    if not condicoes:
+        return None
+    return condicoes[0] if len(condicoes) == 1 else {"$and": condicoes}
+
+
+@router.post(
+    "/ask",
+    response_model=AskResponse,
+    summary="Responde a pergunta com base nos documentos, citando as fontes",
+    responses={409: {"description": "Nenhum documento indexado"}},
+)
+def ask(
+    body: AskRequest,
+    colecao=Depends(obter_colecao_rag),
+    embedder=Depends(obter_embedder_rag),
+    llm=Depends(obter_llm_rag),
+):
+    """
+    1. Busca os trechos mais parecidos com a pergunta.
+    2. Se nenhum for relevante o bastante, responde **"não encontrei"** sem chamar o LLM.
+    3. Envia os trechos numerados ao LLM, que responde **só com base neles**, citando `[n]`.
+    4. Confere as citações: as que não existem são removidas; sem nenhuma, tenta de novo.
+
+    Se o LLM falhar, a resposta traz os trechos encontrados e um `aviso`, nunca um erro 500.
+    """
+    if colecao.count() == 0:
+        raise HTTPException(status_code=409, detail="Nenhum documento indexado")
+    filtros = montar_filtros(body.doc_id, body.fonte)
+    return responder(body.pergunta, colecao, embedder, llm, k=body.top_k, filtros=filtros)
 
 
 @router.post(
@@ -156,10 +206,7 @@ def search(
     if colecao.count() == 0:
         raise HTTPException(status_code=409, detail="Nenhum documento indexado")
 
-    condicoes = [
-        {campo: valor} for campo, valor in (("doc_id", body.doc_id), ("fonte", body.fonte)) if valor
-    ]
-    filtros = condicoes[0] if len(condicoes) == 1 else ({"$and": condicoes} if condicoes else None)
+    filtros = montar_filtros(body.doc_id, body.fonte)
 
     resultados = buscar(body.query, colecao, embedder, k=body.top_k, filtros=filtros)
     return SearchResponse(

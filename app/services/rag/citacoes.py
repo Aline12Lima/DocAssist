@@ -13,6 +13,8 @@ from dataclasses import dataclass
 # Aceita [1], [1][2] e também [1, 2]; guarda o espaço antes para poder removê-lo junto
 CITACAO = re.compile(r"(?P<espaco>[ \t]*)\[(?P<numeros>\d+(?:\s*,\s*\d+)*)\]")
 CODIGO = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
+# Alguns modelos escrevem 【1】 (colchetes "orientais") em vez de [1]
+COLCHETE_ORIENTAL = re.compile(r"【\s*(\d+(?:\s*,\s*\d+)*)\s*】")
 
 
 @dataclass
@@ -43,5 +45,5 @@ def validar_citacoes(texto: str, total_de_trechos: int) -> CitacoesValidadas:
     # As partes de índice ímpar são código: ficam como estão.
     partes = CODIGO.split(texto)
     for i in range(0, len(partes), 2):
-        partes[i] = CITACAO.sub(trocar, partes[i])
+        partes[i] = CITACAO.sub(trocar, COLCHETE_ORIENTAL.sub(r"[\1]", partes[i]))
     return CitacoesValidadas("".join(partes).strip(), citados, invalidas)

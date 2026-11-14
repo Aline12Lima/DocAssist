@@ -134,7 +134,7 @@ def test_ask_responde_com_citacoes(cliente, monkeypatch):
     assert corpo["resposta"] == "Ela é apagada após o timeout [1]."
     assert corpo["citacoes"][0]["n"] == 1
     assert corpo["citacoes"][0]["doc_id"] == "guia-redis"
-    assert corpo["meta"]["prompt_version"] == "answer_v1"
+    assert corpo["meta"]["prompt_version"] == settings.LLM_PROMPT_VERSAO
 
 
 def test_ask_com_base_vazia_responde_409(cliente):

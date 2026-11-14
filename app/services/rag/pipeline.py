@@ -10,7 +10,7 @@ import time
 from app.config import settings
 from app.services.llm.base import ErroDoProvedor
 from app.services.rag.citacoes import validar_citacoes
-from app.services.rag.geracao import VERSAO_DO_PROMPT, eh_sem_resposta, montar_mensagens
+from app.services.rag.geracao import eh_sem_resposta, montar_mensagens, versao_do_prompt
 from app.services.rag.vetores import buscar
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def responder(
     )
     meta = {
         "modelo": None,
-        "prompt_version": VERSAO_DO_PROMPT,
+        "prompt_version": versao_do_prompt(),
         "tokens_entrada": 0,
         "tokens_saida": 0,
         "tentativas": 0,

@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 800
     LLM_TEMPERATURA: float = 0.1
     LLM_TIMEOUT: float = 30.0
+    LLM_PROMPT_VERSAO: str = "answer_v2"  # arquivo em prompts/<versão>.md
 
     # Banco de dados
     DATABASE_URL: str = "postgresql://nlp_user:nlp_pass@postgres:5432/nlp_db"

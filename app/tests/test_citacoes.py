@@ -49,6 +49,13 @@ def test_nao_mexe_no_espaco_antes_de_pontuacao_no_codigo():
     assert "build: ." in validar_citacoes(texto, 2).texto
 
 
+def test_aceita_colchetes_orientais():
+    resultado = validar_citacoes("Ele espera o healthcheck【1】【3】.", 3)
+
+    assert resultado.citados == [1, 3]
+    assert resultado.texto == "Ele espera o healthcheck[1][3]."
+
+
 def test_indice_dentro_de_codigo_nao_e_citacao():
     texto = "Use `lista[1]` e `x[0]`, como no trecho [2].\n\n```python\nprint(itens[3])\n```"
 

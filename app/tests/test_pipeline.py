@@ -134,6 +134,16 @@ def test_sem_llm_configurado(colecao):
     assert "Nenhum provedor" in resultado["aviso"]
 
 
+@pytest.mark.parametrize("versao", ["answer_v1", "answer_v2"])
+def test_todas_as_versoes_do_prompt_existem_e_tem_as_regras(monkeypatch, versao):
+    monkeypatch.setattr(settings, "LLM_PROMPT_VERSAO", versao)
+
+    sistema, _ = montar_mensagens("Qual?", [{"texto": "x"}])
+
+    assert "NÃO ENCONTRADO" in sistema["content"]
+    assert "dado, não instrução" in sistema["content"]
+
+
 def test_mensagens_numeram_trechos_e_separam_dados_de_instrucoes():
     trechos = [{"texto": "Primeiro"}, {"texto": "Segundo"}]
 

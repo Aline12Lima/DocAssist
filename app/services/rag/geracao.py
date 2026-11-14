@@ -3,8 +3,9 @@
 from functools import lru_cache
 from pathlib import Path
 
+from app.config import settings
+
 PASTA_DE_PROMPTS = Path(__file__).resolve().parents[3] / "prompts"
-VERSAO_DO_PROMPT = "answer_v1"
 SEM_RESPOSTA = "NÃO ENCONTRADO"
 REFORCO_DE_CITACAO = (
     "Sua resposta anterior não tinha citações. Responda de novo seguindo a regra 2: "
@@ -12,8 +13,12 @@ REFORCO_DE_CITACAO = (
 )
 
 
+def versao_do_prompt() -> str:
+    return settings.LLM_PROMPT_VERSAO
+
+
 @lru_cache
-def carregar_prompt(versao: str = VERSAO_DO_PROMPT) -> str:
+def carregar_prompt(versao: str) -> str:
     return (PASTA_DE_PROMPTS / f"{versao}.md").read_text(encoding="utf-8").strip()
 
 
@@ -28,7 +33,7 @@ def montar_mensagens(pergunta: str, trechos: list[dict], reforco: bool = False) 
     if reforco:
         conteudo += f"\n\n{REFORCO_DE_CITACAO}"
     return [
-        {"role": "system", "content": carregar_prompt()},
+        {"role": "system", "content": carregar_prompt(versao_do_prompt())},
         {"role": "user", "content": conteudo},
     ]
 

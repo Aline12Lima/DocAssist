@@ -48,3 +48,47 @@ class LLMFalso:
 class LLMQueFalha(LLMFalso):
     def __init__(self):
         super().__init__(ErroDoProvedor("todos falharam"))
+
+
+class RedisFalso:
+    """Imita o que o cache usa do Redis: get, setex e incr (sem expirar de verdade)."""
+
+    def __init__(self):
+        self.dados: dict[str, str] = {}
+        self.ttls: dict[str, int] = {}
+
+    def get(self, chave):
+        return self.dados.get(chave)
+
+    def setex(self, chave, ttl, valor):
+        self.dados[chave] = valor
+        self.ttls[chave] = ttl
+
+    def incr(self, chave):
+        self.dados[chave] = str(int(self.dados.get(chave, 0)) + 1)
+        return int(self.dados[chave])
+
+
+class RedisForaDoAr:
+    def __getattr__(self, nome):
+        import redis
+
+        def falhar(*args, **kwargs):
+            raise redis.ConnectionError("Redis fora do ar")
+
+        return falhar
+
+
+def sessao_de_teste():
+    """Um banco SQLite em memória com todas as tabelas, para um teste só."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.database.connection import Base
+
+    motor = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(motor)
+    return sessionmaker(bind=motor)()

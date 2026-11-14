@@ -6,10 +6,11 @@ from chromadb.config import Settings as ChromaSettings
 from fastapi.testclient import TestClient
 
 from app.config import settings
+from app.database.connection import get_db
 from app.main import app
-from app.routers.rag import obter_colecao_rag, obter_embedder_rag, obter_llm_rag
+from app.routers.rag import obter_colecao_rag, obter_embedder_rag, obter_llm_rag, obter_redis_rag
 from app.services.rag.vetores import obter_colecao
-from app.tests.fakes import EmbedderFalso, LLMFalso
+from app.tests.fakes import EmbedderFalso, LLMFalso, LLMQueFalha, RedisFalso, sessao_de_teste
 
 MARKDOWN = b"""# Guia do Redis
 
@@ -29,8 +30,14 @@ def cliente():
     colecao = obter_colecao("docs_teste_api", recriar=True, cliente=chroma)
     app.dependency_overrides[obter_colecao_rag] = lambda: colecao
     app.dependency_overrides[obter_embedder_rag] = lambda: EmbedderFalso()
-    app.dependency_overrides[obter_llm_rag] = lambda: LLMFalso("Ela é apagada após o timeout [1].")
-    yield TestClient(app)
+    llm = LLMFalso(*["Ela é apagada após o timeout [1]."] * 10)
+    redis, db = RedisFalso(), sessao_de_teste()
+    app.dependency_overrides[obter_llm_rag] = lambda: llm
+    app.dependency_overrides[obter_redis_rag] = lambda: redis
+    app.dependency_overrides[get_db] = lambda: db
+    cliente = TestClient(app)
+    cliente.llm, cliente.redis = llm, redis
+    yield cliente
     app.dependency_overrides.clear()
     chroma.delete_collection("docs_teste_api")
 
@@ -141,3 +148,66 @@ def test_ask_com_base_vazia_responde_409(cliente):
     resposta = cliente.post("/rag/ask", json={"pergunta": "qualquer coisa"})
 
     assert resposta.status_code == 409
+
+
+def perguntar(cliente, pergunta="key deleted after timeout expired"):
+    return cliente.post("/rag/ask", json={"pergunta": pergunta}).json()
+
+
+def test_ask_repetida_vem_do_cache_sem_chamar_o_llm(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente, doc_id="guia-redis")
+
+    primeira = perguntar(cliente)
+    segunda = perguntar(cliente, "  Key deleted after TIMEOUT expired?? ")
+
+    assert primeira["meta"]["cache"] is False
+    assert segunda["meta"]["cache"] is True
+    assert segunda["resposta"] == primeira["resposta"]
+    assert segunda["pergunta"] == "  Key deleted after TIMEOUT expired?? "
+    assert len(cliente.llm.mensagens_recebidas) == 1  # o LLM só foi chamado uma vez
+
+
+def test_ingestao_invalida_o_cache(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente, doc_id="guia-redis")
+    perguntar(cliente)
+    versao_antes = cliente.get("/rag/stats").json()["index_version"]
+
+    enviar(cliente, nome="novo.md", conteudo=b"# Novo\n\nUm documento novo sobre timeout.")
+    depois = perguntar(cliente)
+
+    assert cliente.get("/rag/stats").json()["index_version"] == versao_antes + 1
+    assert depois["meta"]["cache"] is False
+    assert len(cliente.llm.mensagens_recebidas) == 2
+
+
+def test_reenviar_o_mesmo_arquivo_nao_invalida(cliente):
+    enviar(cliente, doc_id="guia-redis")
+    versao = cliente.get("/rag/stats").json()["index_version"]
+
+    enviar(cliente, doc_id="guia-redis")  # nada mudou
+
+    assert cliente.get("/rag/stats").json()["index_version"] == versao
+
+
+def test_falha_do_llm_nao_vai_para_o_cache(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente, doc_id="guia-redis")
+    app.dependency_overrides[obter_llm_rag] = lambda: LLMQueFalha()
+
+    perguntar(cliente)
+
+    assert not [c for c in cliente.redis.dados if c.startswith("rag:ans:")]
+
+
+def test_ask_registra_no_historico(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente, doc_id="guia-redis")
+
+    resposta = perguntar(cliente)
+    perguntar(cliente)  # a segunda vem do cache
+
+    historico = cliente.get("/rag/interacoes").json()
+    assert resposta["interacao_id"] in [h["id"] for h in historico]
+    assert sorted(h["do_cache"] for h in historico) == [False, True]

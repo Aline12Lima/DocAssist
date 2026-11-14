@@ -27,6 +27,7 @@ def montar_citacao(n: int, trecho: dict) -> dict:
     metadados = trecho["metadados"]
     return {
         "n": n,
+        "chunk_id": trecho["id"],
         "doc_id": metadados.get("doc_id"),
         "titulo": metadados.get("titulo"),
         "secao": metadados.get("secao"),
@@ -52,6 +53,9 @@ def responder(
         "tentativas": 0,
         "citacoes_invalidas": [],
         "distancia_top1": round(trechos[0]["distancia"], 4) if trechos else None,
+        "chunk_ids_recuperados": [t["id"] for t in trechos],
+        "falha_do_llm": False,  # True = não vale guardar no cache
+        "cache": False,
     }
     mais_proximos = [montar_citacao(n, t) for n, t in enumerate(trechos[:3], start=1)]
 
@@ -75,6 +79,7 @@ def responder(
             "Trechos mais próximos, abaixo do limiar de relevância.",
         )
     if llm is None:
+        meta["falha_do_llm"] = True
         return resultado(FALHA_DO_LLM, False, mais_proximos, "Nenhum provedor de LLM configurado.")
 
     # 2. Gerar; se vier sem citações, tentar mais uma vez com a regra reforçada
@@ -87,6 +92,7 @@ def responder(
             )
         except ErroDoProvedor as erro:
             logger.error("Falha ao gerar resposta: %s", erro)
+            meta["falha_do_llm"] = True
             return resultado(
                 FALHA_DO_LLM,
                 False,

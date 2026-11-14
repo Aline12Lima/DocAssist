@@ -2,9 +2,11 @@ import time
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.database.connection import get_db
 from app.schemas.requests import AskRequest, DocumentRequest, SearchRequest
 from app.schemas.responses import (
     AskResponse,
@@ -12,10 +14,18 @@ from app.schemas.responses import (
     DocumentosResponse,
     DocumentResponse,
     IngestResponse,
+    InteracaoInfo,
     SearchResponse,
     SearchResult,
 )
 from app.services.llm.cadeia import criar_cadeia
+from app.services.rag.cache import (
+    buscar_resposta,
+    guardar_resposta,
+    invalidar,
+    montar_chave,
+    versao_do_indice,
+)
 from app.services.rag.documentos import (
     EXTENSOES_ACEITAS,
     colecao_principal,
@@ -26,8 +36,11 @@ from app.services.rag.documentos import (
     listar_documentos,
     remover_documento,
 )
+from app.services.rag.geracao import versao_do_prompt
+from app.services.rag.historico import listar_interacoes, registrar_interacao
 from app.services.rag.pipeline import responder
 from app.services.rag.vetores import buscar
+from app.services.redis_service import get_redis_client
 
 router = APIRouter()
 
@@ -39,6 +52,14 @@ def obter_colecao_rag():
 
 def obter_embedder_rag():
     return embedder_principal()
+
+
+def obter_redis_rag():
+    """O cliente do Redis; None se ele estiver fora do ar (o RAG segue sem cache)."""
+    try:
+        return get_redis_client()
+    except Exception:  # noqa: BLE001 - qualquer falha de conexão só desliga o cache
+        return None
 
 
 @lru_cache
@@ -72,19 +93,59 @@ def ask(
     colecao=Depends(obter_colecao_rag),
     embedder=Depends(obter_embedder_rag),
     llm=Depends(obter_llm_rag),
+    redis_cliente=Depends(obter_redis_rag),
+    db: Session = Depends(get_db),
 ):
     """
+    0. Se a mesma pergunta já foi respondida com a base e o prompt atuais, devolve do
+       **cache**, em milissegundos e sem chamar o LLM.
     1. Busca os trechos mais parecidos com a pergunta.
     2. Se nenhum for relevante o bastante, responde **"não encontrei"** sem chamar o LLM.
     3. Envia os trechos numerados ao LLM, que responde **só com base neles**, citando `[n]`.
     4. Confere as citações: as que não existem são removidas; sem nenhuma, tenta de novo.
 
     Se o LLM falhar, a resposta traz os trechos encontrados e um `aviso`, nunca um erro 500.
+    Toda pergunta fica registrada no histórico (`interacao_id`).
     """
     if colecao.count() == 0:
         raise HTTPException(status_code=409, detail="Nenhum documento indexado")
+
+    inicio = time.perf_counter()
     filtros = montar_filtros(body.doc_id, body.fonte)
-    return responder(body.pergunta, colecao, embedder, llm, k=body.top_k, filtros=filtros)
+    k = body.top_k or settings.RAG_TOP_K_CONTEXTO
+    versao = versao_do_indice(redis_cliente)
+    chave = montar_chave(body.pergunta, filtros, k, versao, versao_do_prompt())
+
+    resultado = buscar_resposta(redis_cliente, chave)
+    if resultado:
+        resultado["pergunta"] = body.pergunta  # como a pessoa escreveu desta vez
+        resultado["meta"]["cache"] = True
+        resultado["meta"]["latencia_ms"] = int((time.perf_counter() - inicio) * 1000)
+    else:
+        resultado = responder(body.pergunta, colecao, embedder, llm, k=k, filtros=filtros)
+        resultado["meta"]["index_version"] = versao
+        if not resultado["meta"]["falha_do_llm"]:  # uma falha não pode ficar 24 h no cache
+            guardar_resposta(redis_cliente, chave, resultado, settings.RAG_CACHE_TTL_S)
+
+    resultado["meta"]["index_version"] = versao
+    resultado["interacao_id"] = registrar_interacao(
+        db, resultado, filtros, versao, do_cache=resultado["meta"]["cache"]
+    )
+    return resultado
+
+
+@router.get(
+    "/interacoes",
+    response_model=list[InteracaoInfo],
+    summary="Últimas perguntas feitas ao /rag/ask",
+)
+def list_interactions(
+    limite: int = Query(20, ge=1, le=200),
+    so_sem_resposta: bool = Query(False, description="Só as que terminaram sem resposta"),
+    db: Session = Depends(get_db),
+):
+    """Histórico com modelo, tokens, latência e se a resposta veio do cache."""
+    return listar_interacoes(db, limite, so_sem_resposta)
 
 
 @router.post(
@@ -104,6 +165,7 @@ def ingest(
     fonte: str | None = Form(None, description="Fonte, para filtrar buscas (ex.: docker)"),
     colecao=Depends(obter_colecao_rag),
     embedder=Depends(obter_embedder_rag),
+    redis_cliente=Depends(obter_redis_rag),
 ):
     """
     Lê o arquivo, divide em seções e chunks, gera os embeddings e salva na base.
@@ -129,6 +191,8 @@ def ingest(
     )
     if resultado.chunks == 0:
         raise HTTPException(status_code=422, detail="Nenhum texto encontrado no arquivo")
+    if resultado.gerados or resultado.removidos:
+        invalidar(redis_cliente)  # a base mudou: respostas antigas deixam de valer
 
     return IngestResponse(
         doc_id=doc_id,
@@ -157,10 +221,13 @@ def list_documents(colecao=Depends(obter_colecao_rag)):
     summary="Remove um documento e todos os seus chunks",
     responses={404: {"description": "Documento não encontrado"}},
 )
-def delete_document(doc_id: str, colecao=Depends(obter_colecao_rag)):
+def delete_document(
+    doc_id: str, colecao=Depends(obter_colecao_rag), redis_cliente=Depends(obter_redis_rag)
+):
     removidos = remover_documento(colecao, doc_id)
     if removidos == 0:
         raise HTTPException(status_code=404, detail=f"Documento não encontrado: {doc_id}")
+    invalidar(redis_cliente)
     return {"doc_id": doc_id, "chunks_removidos": removidos}
 
 
@@ -174,6 +241,7 @@ def add_doc(
     body: DocumentRequest,
     colecao=Depends(obter_colecao_rag),
     embedder=Depends(obter_embedder_rag),
+    redis_cliente=Depends(obter_redis_rag),
 ):
     """
     Mantido por compatibilidade. O texto é tratado como um pequeno documento Markdown e
@@ -181,7 +249,11 @@ def add_doc(
     """
     doc_id = body.metadata.get("doc_id") or doc_id_de_texto(body.text)
     documento = {"titulo": body.metadata.get("titulo"), "fonte": body.metadata.get("fonte")}
-    ingerir_conteudo(body.text.encode("utf-8"), ".md", doc_id, colecao, embedder, documento)
+    resultado = ingerir_conteudo(
+        body.text.encode("utf-8"), ".md", doc_id, colecao, embedder, documento
+    )
+    if resultado.gerados or resultado.removidos:
+        invalidar(redis_cliente)
     return DocumentResponse(id=doc_id, text=body.text)
 
 
@@ -222,11 +294,16 @@ def search(
 
 
 @router.get("/stats", summary="Estatísticas da base")
-def get_stats(colecao=Depends(obter_colecao_rag), embedder=Depends(obter_embedder_rag)):
+def get_stats(
+    colecao=Depends(obter_colecao_rag),
+    embedder=Depends(obter_embedder_rag),
+    redis_cliente=Depends(obter_redis_rag),
+):
     """Coleção em uso, modelo de embedding, quantidade de documentos e de chunks."""
     return {
         "colecao": colecao.name,
         "modelo": embedder.config.nome,
         "documentos": len(listar_documentos(colecao)),
         "chunks": colecao.count(),
+        "index_version": versao_do_indice(redis_cliente),
     }

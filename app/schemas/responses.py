@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -133,6 +135,7 @@ class Citacao(BaseModel):
     """Um trecho citado na resposta como [n]."""
 
     n: int = Field(..., description="Número usado na resposta, como em [1]")
+    chunk_id: str | None = Field(None, description="ID do chunk na base")
     doc_id: str | None = None
     titulo: str | None = None
     secao: str | None = Field(None, description="Documento › Seção")
@@ -153,14 +156,37 @@ class MetaResposta(BaseModel):
     citacoes_invalidas: list[int]
     distancia_top1: float | None = None
     latencia_ms: int
+    cache: bool = Field(False, description="True = resposta veio do cache, sem chamar o LLM")
+    index_version: int = Field(0, description="Versão da base quando a resposta foi gerada")
 
 
 class AskResponse(BaseModel):
     """Resposta fundamentada nos documentos, com as fontes."""
 
+    interacao_id: str | None = Field(None, description="ID no histórico (para o feedback)")
     pergunta: str
     resposta: str
     encontrou_resposta: bool
     citacoes: list[Citacao]
     aviso: str | None = None
     meta: MetaResposta
+
+
+class InteracaoInfo(BaseModel):
+    """Uma pergunta registrada no histórico do /rag/ask."""
+
+    model_config = {"from_attributes": True}
+
+    id: str
+    pergunta: str
+    resposta: str
+    encontrou_resposta: bool
+    aviso: str | None = None
+    modelo: str | None = None
+    prompt_version: str
+    tokens_entrada: int
+    tokens_saida: int
+    latencia_ms: int
+    index_version: int
+    do_cache: bool
+    criado_em: datetime | None = None

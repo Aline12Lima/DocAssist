@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # Carrega o modelo de embedding ao subir a API, para a 1ª pergunta não demorar.
     # Desligue (false) onde a memória for curta.
     RAG_AQUECER_MODELO: bool = True
+    RAG_CACHE_TTL_S: int = 86400  # respostas do /rag/ask ficam 24 h no cache
 
     # LLM (as chaves ficam só no .env, nunca no código)
     GROQ_API_KEY: str = ""

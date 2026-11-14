@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Acima desta distância, responde "não encontrei" sem chamar o LLM.
     # Calibrado no E2 para o e5; outro modelo de embedding precisa de outro valor.
     RAG_LIMIAR_DISTANCIA: float = 0.17
+    # Carrega o modelo de embedding ao subir a API, para a 1ª pergunta não demorar.
+    # Desligue (false) onde a memória for curta.
+    RAG_AQUECER_MODELO: bool = True
 
     # LLM (as chaves ficam só no .env, nunca no código)
     GROQ_API_KEY: str = ""

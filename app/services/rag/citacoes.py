@@ -15,6 +15,8 @@ CITACAO = re.compile(r"(?P<espaco>[ \t]*)\[(?P<numeros>\d+(?:\s*,\s*\d+)*)\]")
 CODIGO = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
 # Alguns modelos escrevem 【1】 (colchetes "orientais") em vez de [1]
 COLCHETE_ORIENTAL = re.compile(r"【\s*(\d+(?:\s*,\s*\d+)*)\s*】")
+# Citação grudada no fechamento de um bloco de código (```[1]) quebra o Markdown
+CITACAO_NA_CERCA = re.compile(r"^([ \t]*```)[ \t]*((?:\[\d+\])+)[ \t]*$", re.MULTILINE)
 
 
 @dataclass
@@ -43,6 +45,7 @@ def validar_citacoes(texto: str, total_de_trechos: int) -> CitacoesValidadas:
         return encontrado.group("espaco") + "".join(f"[{n}]" for n in validos)
 
     # As partes de índice ímpar são código: ficam como estão.
+    texto = CITACAO_NA_CERCA.sub(r"\1\n\2", texto)
     partes = CODIGO.split(texto)
     for i in range(0, len(partes), 2):
         partes[i] = CITACAO.sub(trocar, COLCHETE_ORIENTAL.sub(r"[\1]", partes[i]))

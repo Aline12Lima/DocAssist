@@ -72,3 +72,43 @@ Meta do escopo (O2): Recall@5 por trecho ≥ 0,85.
   com mais perguntas sem resposta.
 - No exercício de embeddings (`scripts/estudo_embeddings.py`), o e5 manteve a mesma separação
   entre frases relevantes e irrelevantes com a pergunta em português ou em inglês; o MiniLM não.
+
+## Geração com citações (Fase 5)
+
+Configuração: E2 (e5-small, chunks, busca exata), 5 trechos por pergunta, limiar de distância
+0,17, cadeia de LLM `groq:openai/gpt-oss-120b` → `groq:qwen/qwen3.8-27b` →
+`gemini:gemini-3.5-flash-lite`. Relatórios em `evals/reports/*_respostas_*.md`.
+
+| Prompt | Respondidas | Respondeu e recusou quando devia | Falsa recusa | Recusou sem resposta | 2ª tentativa | Latência mediana |
+| --- | --- | --- | --- | --- | --- | --- |
+| answer_v1 | 14 de 20 | 17 de 20 | 3 de 17 (18%) | 3 de 3 | 5 | 1,66 s |
+| answer_v2 | 16 de 20 | 19 de 20 | 1 de 17 (6%) | 3 de 3 | 0 | 1,25 s |
+
+Metas do escopo: acerto em "sem resposta" ≥ 80% (atingida: 3 de 3); falsa recusa ≤ 10%
+(atingida no v2: 6%).
+
+### O que mudou do v1 para o v2
+
+- Proibição explícita de acrescentar exemplos, comandos ou recomendações fora dos trechos.
+- "Toda frase com informação técnica termina com a citação"; sem trecho para citar, não escrever.
+- Responder primeiro o que foi perguntado (começar com "Sim" ou "Não" em perguntas de sim ou não).
+- Um exemplo de formato com assunto fora do corpus (Git), para não contaminar a avaliação.
+
+### Análise de erros
+
+- **q12 (recuperação):** os 5 trechos vieram de `redis-persistence`; o modelo recusou
+  corretamente. Depende de melhorar a busca (Fase 7).
+- **q13:** recusada no v1 e respondida no v2 com os mesmos trechos. O trecho de dependências do
+  FastAPI estava na 4ª posição; no v1 quem respondeu foi o modelo de reserva (qwen), que não o
+  aproveitou. A cadeia de reserva garante resposta, mas o modelo de reserva pode ser menos capaz.
+- **q02 (ambiguidade):** "o compose espera o banco ficar pronto?" foi lida como "consegue
+  esperar?" e respondida com "Sim, com `service_healthy`"; a segunda frase traz o comportamento
+  padrão correto. O prompt não foi ajustado só para essa pergunta, para não sobreajustar o
+  sistema ao golden set. Fica para o juiz automático da Fase 8.
+- **Formatação:** o modelo às vezes grudava a citação no fechamento de um bloco de código
+  (```` ```[1] ````), o que quebra o Markdown. A validação de citações passou a mover a citação
+  para a linha de baixo.
+- **Latência:** a 1ª pergunta levava de 12 a 18 s porque carregava o modelo de embedding. A API
+  passou a carregá-lo na inicialização (`RAG_AQUECER_MODELO`).
+- **Cadeia de reserva:** o `gpt-oss-120b` atingiu o limite de tokens por minuto do Groq várias
+  vezes durante o golden set (7 no v1, 4 no v2); o `qwen` assumiu sem nenhum erro para o usuário.

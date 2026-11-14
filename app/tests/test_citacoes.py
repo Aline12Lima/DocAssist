@@ -56,6 +56,15 @@ def test_aceita_colchetes_orientais():
     assert resultado.texto == "Ele espera o healthcheck[1][3]."
 
 
+def test_citacao_grudada_no_fim_do_bloco_vai_para_a_linha_de_baixo():
+    texto = "Instale:\n\n```console\n$ uv add pytest\n```[1]\n\nPronto."
+
+    resultado = validar_citacoes(texto, 2)
+
+    assert "```console\n$ uv add pytest\n```\n[1]" in resultado.texto
+    assert resultado.citados == [1]
+
+
 def test_indice_dentro_de_codigo_nao_e_citacao():
     texto = "Use `lista[1]` e `x[0]`, como no trecho [2].\n\n```python\nprint(itens[3])\n```"
 

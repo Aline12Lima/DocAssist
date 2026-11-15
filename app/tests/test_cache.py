@@ -62,3 +62,9 @@ def test_redis_fora_do_ar_nao_derruba_nada():
 def test_sem_redis_configurado():
     assert versao_do_indice(None) == 0
     assert buscar_resposta(None, "rag:ans:x") is None
+
+
+def test_chave_muda_com_a_configuracao_da_busca():
+    sem = montar_chave("pergunta", None, 5, 1, "answer_v2", "vetorial:0.17")
+    com = montar_chave("pergunta", None, 5, 1, "answer_v2", "reranker:modelo:20:2.0")
+    assert sem != com

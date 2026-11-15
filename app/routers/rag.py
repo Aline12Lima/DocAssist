@@ -38,7 +38,8 @@ from app.services.rag.documentos import (
 )
 from app.services.rag.geracao import versao_do_prompt
 from app.services.rag.historico import listar_interacoes, registrar_interacao
-from app.services.rag.pipeline import responder
+from app.services.rag.pipeline import assinatura_da_recuperacao, responder
+from app.services.rag.reranker import obter_reranker
 from app.services.rag.vetores import buscar
 from app.services.redis_service import get_redis_client
 
@@ -75,6 +76,13 @@ def obter_llm_rag():
         return None
 
 
+def obter_reranker_rag():
+    """O reranker; None se ele estiver desligado (RAG_RERANKER_ATIVO=false no .env)."""
+    if not settings.RAG_RERANKER_ATIVO:
+        return None
+    return obter_reranker(settings.RAG_RERANKER_MODELO)
+
+
 def montar_filtros(doc_id: str | None, fonte: str | None) -> dict | None:
     condicoes = [{campo: valor} for campo, valor in (("doc_id", doc_id), ("fonte", fonte)) if valor]
     if not condicoes:
@@ -94,12 +102,13 @@ def ask(
     embedder=Depends(obter_embedder_rag),
     llm=Depends(obter_llm_rag),
     redis_cliente=Depends(obter_redis_rag),
+    reranker=Depends(obter_reranker_rag),
     db: Session = Depends(get_db),
 ):
     """
     0. Se a mesma pergunta já foi respondida com a base e o prompt atuais, devolve do
        **cache**, em milissegundos e sem chamar o LLM.
-    1. Busca os trechos mais parecidos com a pergunta.
+    1. Busca os candidatos mais parecidos com a pergunta e o **reranker** os reordena.
     2. Se nenhum for relevante o bastante, responde **"não encontrei"** sem chamar o LLM.
     3. Envia os trechos numerados ao LLM, que responde **só com base neles**, citando `[n]`.
     4. Confere as citações: as que não existem são removidas; sem nenhuma, tenta de novo.
@@ -114,7 +123,9 @@ def ask(
     filtros = montar_filtros(body.doc_id, body.fonte)
     k = body.top_k or settings.RAG_TOP_K_CONTEXTO
     versao = versao_do_indice(redis_cliente)
-    chave = montar_chave(body.pergunta, filtros, k, versao, versao_do_prompt())
+    chave = montar_chave(
+        body.pergunta, filtros, k, versao, versao_do_prompt(), assinatura_da_recuperacao(reranker)
+    )
 
     resultado = buscar_resposta(redis_cliente, chave)
     if resultado:
@@ -122,7 +133,9 @@ def ask(
         resultado["meta"]["cache"] = True
         resultado["meta"]["latencia_ms"] = int((time.perf_counter() - inicio) * 1000)
     else:
-        resultado = responder(body.pergunta, colecao, embedder, llm, k=k, filtros=filtros)
+        resultado = responder(
+            body.pergunta, colecao, embedder, llm, k=k, filtros=filtros, reranker=reranker
+        )
         resultado["meta"]["index_version"] = versao
         if not resultado["meta"]["falha_do_llm"]:  # uma falha não pode ficar 24 h no cache
             guardar_resposta(redis_cliente, chave, resultado, settings.RAG_CACHE_TTL_S)

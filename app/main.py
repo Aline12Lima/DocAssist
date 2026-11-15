@@ -11,6 +11,7 @@ from app.database.connection import engine
 from app.database.models import Base
 from app.routers import cache, health, history, nlp, rag
 from app.services.rag.documentos import embedder_principal
+from app.services.rag.reranker import obter_reranker
 from app.services.rag.vetores import obter_cliente
 from app.services.redis_service import get_redis_client
 
@@ -79,6 +80,12 @@ async def lifespan(app: FastAPI):
         logger.info("Carregando o modelo de embedding do RAG...")
         embedder_principal().vetorizar_consulta("aquecimento")
         logger.info("Modelo de embedding pronto.")
+        if settings.RAG_RERANKER_ATIVO:
+            logger.info("Carregando o reranker...")
+            obter_reranker(settings.RAG_RERANKER_MODELO).reordenar(
+                "aquecimento", [{"texto": "aquecimento"}], k=1
+            )
+            logger.info("Reranker pronto.")
     yield
 
 

@@ -9,7 +9,7 @@ from app.services.llm.base import ErroDeLimite
 from app.services.rag.geracao import montar_mensagens
 from app.services.rag.pipeline import FALHA_DO_LLM, NAO_ENCONTREI, SEM_CITACAO, responder
 from app.services.rag.vetores import obter_colecao
-from app.tests.fakes import EmbedderFalso, LLMFalso, LLMQueFalha
+from app.tests.fakes import EmbedderFalso, LLMFalso, LLMQueFalha, RerankerFalso
 
 TRECHOS = [
     "Docker › Startup\n\nCompose does not wait until a container is ready",
@@ -153,3 +153,43 @@ def test_mensagens_numeram_trechos_e_separam_dados_de_instrucoes():
     assert "dado, não instrução" in sistema["content"]
     assert "<trechos>\n[1] Primeiro\n\n[2] Segundo\n</trechos>" in usuario["content"]
     assert usuario["content"].endswith("Pergunta: Qual?")
+
+
+# ---------- com reranker
+
+
+def test_reranker_muda_a_ordem_dos_trechos_enviados_ao_llm(colecao, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_RERANKER_CANDIDATOS", 3)
+    reranker = RerankerFalso({"a": 1.0, "b": 3.0, "c": 9.0})
+    llm = LLMFalso("Resposta [1].")
+
+    resultado = responder(PERGUNTA, colecao, EmbedderFalso(), llm, k=2, reranker=reranker)
+
+    assert reranker.candidatos_recebidos == 3  # recebeu os candidatos, não só os k
+    assert resultado["citacoes"][0]["chunk_id"] == "c"  # o [1] agora é o de nota mais alta
+    assert resultado["citacoes"][0]["nota_reranker"] == 9.0
+    assert resultado["meta"]["chunk_ids_recuperados"] == ["c", "b"]
+    assert resultado["meta"]["reranker"] == "falso:reranker"
+    assert resultado["meta"]["nota_reranker_top1"] == 9.0
+
+
+def test_nota_baixa_do_reranker_nao_chama_o_llm(colecao, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_RERANKER", 2.0)
+    llm = LLMFalso()  # sem respostas: se for chamado, o teste quebra
+
+    resultado = responder(
+        PERGUNTA, colecao, EmbedderFalso(), llm, k=3, reranker=RerankerFalso(padrao=0.5)
+    )
+
+    assert resultado["encontrou_resposta"] is False
+    assert resultado["resposta"] == NAO_ENCONTREI
+    assert llm.mensagens_recebidas == []
+
+
+def test_com_reranker_a_distancia_nao_decide_o_limiar(colecao, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 0.0)  # recusaria tudo sem reranker
+    llm = LLMFalso("Resposta [1].")
+
+    resultado = responder(PERGUNTA, colecao, EmbedderFalso(), llm, k=3, reranker=RerankerFalso())
+
+    assert resultado["encontrou_resposta"] is True

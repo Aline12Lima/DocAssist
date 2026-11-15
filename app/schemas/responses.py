@@ -143,6 +143,9 @@ class Citacao(BaseModel):
     url: str | None = Field(None, description="Página original")
     trecho: str = Field(..., description="Texto exato enviado ao LLM")
     distancia: float = Field(..., description="Distância cosseno (menor = mais parecido)")
+    nota_reranker: float | None = Field(
+        None, description="Nota de relevância do reranker (maior = mais relevante)"
+    )
 
 
 class MetaResposta(BaseModel):
@@ -155,6 +158,9 @@ class MetaResposta(BaseModel):
     tentativas: int = Field(..., description="Chamadas ao LLM (2 = precisou reforçar as citações)")
     citacoes_invalidas: list[int]
     distancia_top1: float | None = None
+    reranker: str | None = Field(None, description="Modelo que reordenou os trechos")
+    nota_reranker_top1: float | None = Field(None, description="Nota do melhor trecho")
+    tempo_reranker_ms: int | None = None
     latencia_ms: int
     cache: bool = Field(False, description="True = resposta veio do cache, sem chamar o LLM")
     index_version: int = Field(0, description="Versão da base quando a resposta foi gerada")

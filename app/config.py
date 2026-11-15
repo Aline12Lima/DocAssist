@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 800
     LLM_TEMPERATURA: float = 0.1
     LLM_TIMEOUT: float = 30.0
+    # Juiz da Fase 8: de outra família que o modelo que responde, para não favorecer a si mesmo
+    JUIZ_MODELOS: str = "gemini:gemini-3.5-flash-lite,groq:qwen/qwen3.8-27b"
+    JUIZ_PROMPT_VERSAO: str = "judge_v1"
+    JUIZ_MAX_TOKENS: int = 1500
     LLM_PROMPT_VERSAO: str = "answer_v2"  # arquivo em prompts/<versão>.md
 
     # Banco de dados

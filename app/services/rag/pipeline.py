@@ -1,4 +1,4 @@
-"""Pipeline do /rag/ask: buscar → decidir se dá para responder → gerar → validar as citações.
+"""Pipeline do /rag/ask: buscar → reordenar → decidir se dá para responder → gerar → validar.
 
 A API nunca devolve erro 500 por causa do LLM: se ele falhar ou não citar as fontes,
 a resposta traz os trechos encontrados e um aviso explicando o que aconteceu.
@@ -35,15 +35,59 @@ def montar_citacao(n: int, trecho: dict) -> dict:
         "url": metadados.get("url"),
         "trecho": trecho["texto"],
         "distancia": round(trecho["distancia"], 4),
+        "nota_reranker": arredondar(trecho.get("pontuacao_reranker"), 2),
     }
 
 
+def arredondar(valor, casas: int):
+    return round(valor, casas) if valor is not None else None
+
+
+def assinatura_da_recuperacao(reranker) -> str:
+    """Resume a configuração da busca; entra na chave do cache (mudou a busca, muda a chave)."""
+    if reranker is None:
+        return f"vetorial:{settings.RAG_LIMIAR_DISTANCIA}"
+    return (
+        f"reranker:{reranker.nome}:{settings.RAG_RERANKER_CANDIDATOS}:"
+        f"{settings.RAG_LIMIAR_RERANKER}"
+    )
+
+
+def recuperar(pergunta, colecao, embedder, k: int, filtros, reranker) -> list[dict]:
+    """Sem reranker: os k mais próximos. Com reranker: N candidatos, reordenados, os k melhores."""
+    if reranker is None:
+        return buscar(pergunta, colecao, embedder, k=k, filtros=filtros)
+    candidatos = buscar(
+        pergunta,
+        colecao,
+        embedder,
+        k=max(settings.RAG_RERANKER_CANDIDATOS, k),
+        filtros=filtros,
+    )
+    return reranker.reordenar(pergunta, candidatos, k=k)
+
+
+def abaixo_do_limiar(trechos: list[dict], reranker) -> bool:
+    """O melhor trecho é fraco demais para valer uma chamada ao LLM?"""
+    if not trechos:
+        return True
+    if reranker is not None:
+        return trechos[0]["pontuacao_reranker"] < settings.RAG_LIMIAR_RERANKER
+    return trechos[0]["distancia"] > settings.RAG_LIMIAR_DISTANCIA
+
+
 def responder(
-    pergunta: str, colecao, embedder, llm, k: int | None = None, filtros: dict | None = None
+    pergunta: str,
+    colecao,
+    embedder,
+    llm,
+    k: int | None = None,
+    filtros: dict | None = None,
+    reranker=None,
 ) -> dict:
     inicio = time.perf_counter()
-    trechos = buscar(
-        pergunta, colecao, embedder, k=k or settings.RAG_TOP_K_CONTEXTO, filtros=filtros
+    trechos = recuperar(
+        pergunta, colecao, embedder, k or settings.RAG_TOP_K_CONTEXTO, filtros, reranker
     )
     meta = {
         "modelo": None,
@@ -53,6 +97,11 @@ def responder(
         "tentativas": 0,
         "citacoes_invalidas": [],
         "distancia_top1": round(trechos[0]["distancia"], 4) if trechos else None,
+        "reranker": reranker.nome if reranker is not None else None,
+        "nota_reranker_top1": arredondar(trechos[0].get("pontuacao_reranker"), 2)
+        if trechos
+        else None,
+        "tempo_reranker_ms": int(reranker.ultimo_tempo_ms) if reranker is not None else None,
         "chunk_ids_recuperados": [t["id"] for t in trechos],
         "falha_do_llm": False,  # True = não vale guardar no cache
         "cache": False,
@@ -71,7 +120,7 @@ def responder(
         }
 
     # 1. Nada relevante o bastante: "não encontrei", sem gastar uma chamada ao LLM
-    if not trechos or trechos[0]["distancia"] > settings.RAG_LIMIAR_DISTANCIA:
+    if abaixo_do_limiar(trechos, reranker):
         return resultado(
             NAO_ENCONTREI,
             False,

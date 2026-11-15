@@ -8,9 +8,22 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.database.connection import get_db
 from app.main import app
-from app.routers.rag import obter_colecao_rag, obter_embedder_rag, obter_llm_rag, obter_redis_rag
+from app.routers.rag import (
+    obter_colecao_rag,
+    obter_embedder_rag,
+    obter_llm_rag,
+    obter_redis_rag,
+    obter_reranker_rag,
+)
 from app.services.rag.vetores import obter_colecao
-from app.tests.fakes import EmbedderFalso, LLMFalso, LLMQueFalha, RedisFalso, sessao_de_teste
+from app.tests.fakes import (
+    EmbedderFalso,
+    LLMFalso,
+    LLMQueFalha,
+    RedisFalso,
+    RerankerFalso,
+    sessao_de_teste,
+)
 
 MARKDOWN = b"""# Guia do Redis
 
@@ -35,6 +48,7 @@ def cliente():
     app.dependency_overrides[obter_llm_rag] = lambda: llm
     app.dependency_overrides[obter_redis_rag] = lambda: redis
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[obter_reranker_rag] = lambda: None  # o modelo real não é baixado
     cliente = TestClient(app)
     cliente.llm, cliente.redis = llm, redis
     yield cliente
@@ -211,3 +225,27 @@ def test_ask_registra_no_historico(cliente, monkeypatch):
     historico = cliente.get("/rag/interacoes").json()
     assert resposta["interacao_id"] in [h["id"] for h in historico]
     assert sorted(h["do_cache"] for h in historico) == [False, True]
+
+
+def test_ask_com_reranker_informa_a_nota(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_RERANKER", 2.0)
+    app.dependency_overrides[obter_reranker_rag] = lambda: RerankerFalso(padrao=7.5)
+    enviar(cliente)
+
+    corpo = cliente.post("/rag/ask", json={"pergunta": "Quando a chave é apagada?"}).json()
+
+    assert corpo["encontrou_resposta"] is True
+    assert corpo["meta"]["reranker"] == "falso:reranker"
+    assert corpo["meta"]["nota_reranker_top1"] == 7.5
+    assert corpo["citacoes"][0]["nota_reranker"] == 7.5
+
+
+def test_ask_com_nota_baixa_responde_nao_encontrei(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_RERANKER", 2.0)
+    app.dependency_overrides[obter_reranker_rag] = lambda: RerankerFalso(padrao=0.1)
+    enviar(cliente)
+
+    corpo = cliente.post("/rag/ask", json={"pergunta": "Como configurar o Kubernetes?"}).json()
+
+    assert corpo["encontrou_resposta"] is False
+    assert cliente.llm.mensagens_recebidas == []

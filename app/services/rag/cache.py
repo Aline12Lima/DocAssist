@@ -49,9 +49,23 @@ def invalidar(cliente) -> None:
         logger.warning("Redis indisponível ao invalidar o cache: %s", erro)
 
 
-def montar_chave(pergunta: str, filtros: dict | None, k: int, versao: int, prompt: str) -> str:
+def montar_chave(
+    pergunta: str,
+    filtros: dict | None,
+    k: int,
+    versao: int,
+    prompt: str,
+    recuperacao: str = "",
+) -> str:
+    """`recuperacao` resume a configuração da busca: trocar o reranker também troca a chave."""
     conteudo = json.dumps(
-        {"pergunta": normalizar_pergunta(pergunta), "filtros": filtros, "k": k}, sort_keys=True
+        {
+            "pergunta": normalizar_pergunta(pergunta),
+            "filtros": filtros,
+            "k": k,
+            "recuperacao": recuperacao,
+        },
+        sort_keys=True,
     )
     resumo = hashlib.sha256(conteudo.encode("utf-8")).hexdigest()[:24]
     return f"rag:ans:{versao}:{prompt}:{resumo}"

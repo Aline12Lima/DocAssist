@@ -50,6 +50,27 @@ class LLMQueFalha(LLMFalso):
         super().__init__(ErroDoProvedor("todos falharam"))
 
 
+class RerankerFalso:
+    """Dá a cada trecho a nota do dicionário (por id); os que não estão lá ganham `padrao`."""
+
+    nome = "falso:reranker"
+
+    def __init__(self, notas: dict | None = None, padrao: float = 5.0):
+        self.notas = notas or {}
+        self.padrao = padrao
+        self.ultimo_tempo_ms = 0.0
+        self.candidatos_recebidos = 0
+
+    def reordenar(self, consulta, resultados, k=5):
+        self.ultimo_tempo_ms = 1.0
+        self.candidatos_recebidos = len(resultados)
+        pontuados = [
+            {**r, "pontuacao_reranker": self.notas.get(r["id"], self.padrao)} for r in resultados
+        ]
+        pontuados.sort(key=lambda r: r["pontuacao_reranker"], reverse=True)
+        return pontuados[:k]
+
+
 class RedisFalso:
     """Imita o que o cache usa do Redis: get, setex e incr (sem expirar de verdade)."""
 

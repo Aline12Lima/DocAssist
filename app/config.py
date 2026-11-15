@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # Desligue (false) onde a memória for curta.
     RAG_AQUECER_MODELO: bool = True
     RAG_CACHE_TTL_S: int = 86400  # respostas do /rag/ask ficam 24 h no cache
+    # Reranker (fase 7, E4): a busca vetorial escolhe os candidatos e o cross-encoder
+    # reordena. 20 candidatos: Recall@5 0.90 com ~2,9 s; 30 dá 0.94, mas com ~4,6 s.
+    RAG_RERANKER_ATIVO: bool = True
+    RAG_RERANKER_MODELO: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+    RAG_RERANKER_CANDIDATOS: int = 20
+    # Com o reranker ligado, é esta nota (e não a distância) que decide o "não encontrei".
+    # Calibrado no E4_c20: perguntas sem resposta ficaram todas abaixo de 1.5.
+    RAG_LIMIAR_RERANKER: float = 2.0
 
     # LLM (as chaves ficam só no .env, nunca no código)
     GROQ_API_KEY: str = ""

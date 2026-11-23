@@ -52,10 +52,10 @@ def ler_lista_de_modelos(texto: str) -> list[tuple[str, str]]:
     return pares
 
 
-def criar_cadeia() -> CadeiaDeProvedores:
-    """Monta a cadeia a partir de LLM_MODELOS. Provedores sem chave no .env são pulados."""
+def criar_cadeia(modelos: str | None = None) -> CadeiaDeProvedores:
+    """Monta a cadeia a partir de `modelos` (padrão: LLM_MODELOS). Sem chave no .env, pula."""
     provedores = []
-    for provedor, modelo in ler_lista_de_modelos(settings.LLM_MODELOS):
+    for provedor, modelo in ler_lista_de_modelos(modelos or settings.LLM_MODELOS):
         chave = chave_do_provedor(provedor)
         if provedor not in URLS or not chave:
             logger.info("Pulando %s:%s (provedor desconhecido ou sem chave)", provedor, modelo)

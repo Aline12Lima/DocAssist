@@ -186,6 +186,71 @@ Metas do escopo atingidas: acerto em "sem resposta" ≥ 80% e recusa indevida �
 - **Pendências:** perguntas de dois documentos (diversificar os trechos enviados ao LLM) e
   latência (reranker mais leve ou quantizado; com pouca memória, `RAG_RERANKER_ATIVO=false`).
 
+## Fase 8 — juiz com LLM (correção e fidelidade das respostas)
+
+Até a Fase 7, as métricas diziam se o trecho certo chegava ao LLM. Na Fase 8 um segundo LLM
+(o juiz) avalia a resposta escrita, com duas notas de 0 a 2:
+
+- **Correção:** a resposta diz o mesmo que a `resposta_referencia` do golden set?
+- **Fidelidade:** tudo o que a resposta afirma está nos trechos que ela citou? Verdade que não
+  está nos trechos não conta como fiel (é o que mede se o modelo inventou).
+
+Juiz: `gemini-3.5-flash-lite` (reserva: `qwen3.8-27b`), de outra família que o modelo que
+responde (`gpt-oss-120b`), porque LLMs tendem a favorecer textos parecidos com os seus.
+Dois prompts: `judge_v1` (dá as notas direto) e `judge_v2` (lista cada afirmação da resposta,
+marca se está nos trechos e só então dá as notas).
+
+### Notas nas respostas reais
+
+Respostas: `2026-11-15_F8_respostas` (mesma configuração do E5: 47 respondidas de 50).
+
+| Juiz | Correção média | Correção 2 | Fidelidade média | Fidelidade 2 |
+| --- | --- | --- | --- | --- |
+| J1 (`judge_v1`) | 2,00 | 100% | 2,00 | 100% |
+| J2 (`judge_v2`) | 2,00 | 100% | 1,98 | 98% (q14 com 1) |
+
+### O juiz percebe erros? Teste com respostas estragadas de propósito
+
+100% de nota máxima pode significar respostas ótimas ou um juiz que aprova tudo. Para separar
+os dois casos, `evals/testar_juiz.py` sorteia 10 respostas reais e cria três versões com erros
+conhecidos (`app/services/avaliacao/perturbacoes.py`):
+
+| Versão | O que foi estragado | Esperado | judge_v1 | judge_v2 |
+| --- | --- | --- | --- | --- |
+| resposta trocada | resposta de outra pergunta, de outro documento | correção ≤ 1 e fidelidade ≤ 1 | 10 de 10 | 10 de 10 |
+| afirmação inventada | resposta certa + frase inventada com citação [n] | fidelidade ≤ 1 | 10 de 10 (fid. média 0,40) | 10 de 10 (fid. média 0,10) |
+| trechos trocados | resposta certa com os trechos de outra pergunta | fidelidade ≤ 1 | 10 de 10 | 10 de 10 |
+| original | nada (controle) | — | 2,00 / 2,00 | 2,00 / 2,00 |
+
+O teste foi rodado duas vezes com resultados praticamente iguais (o juiz é estável).
+
+### Conclusões
+
+- Os dois juízes perceberam os 30 erros, nas duas rodadas. A nota 100% das respostas reais não
+  vem de um juiz que aprova tudo: no nível de erros grosseiros (resposta fora do assunto,
+  informação inventada, citação que não sustenta o texto), as respostas do sistema estão boas.
+- **Juiz padrão: `judge_v1`.** Uma frase inventada no fim da resposta é um detalhe secundário,
+  e a regra pede fidelidade 1; o v1 seguiu melhor a regra (metade dos casos com 1), enquanto o
+  v2 deu 0 em quase todos, mais severo do que a própria regra. O v1 também gasta menos tokens.
+  O `judge_v2` continua disponível (`--versao judge_v2`) quando se quer a lista de afirmações
+  para entender uma nota.
+- Defeito conhecido: com uma afirmação inventada, os dois juízes também baixam a correção
+  (média 1,1 a 1,6), embora o essencial da resposta continue certo. As duas notas não ficam
+  totalmente independentes.
+- Limite do teste: os erros criados são grosseiros. Erros sutis (por exemplo, uma afirmação que
+  o trecho só faz para versões antigas do Redis, como na q05) podem passar despercebidos.
+
+### Pendências
+
+- **Calibração com notas humanas** (`evals/rotular.py` e `evals/medir_concordancia.py`):
+  iniciada e adiada. As primeiras notas mostraram que a regra estava ambígua (tradução,
+  paráfrase e respostas mais longas que a referência); a regra foi reescrita, mas as 15 notas
+  ainda não foram dadas. É a forma de verificar os erros sutis.
+- **q14**: única resposta com fidelidade 1 no `judge_v2`; ainda não foi lida para decidir se o
+  juiz tem razão.
+- **q02**: na Fase 5, a resposta começava com "Sim", e a referência diz que o compose não
+  espera o banco por padrão. Os dois juízes deram correção 2; falta conferir a resposta atual.
+
 ## Geração com citações (Fase 5)
 
 Configuração: E2 (e5-small, chunks, busca exata), 5 trechos por pergunta, limiar de distância

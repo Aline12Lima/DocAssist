@@ -8,6 +8,8 @@ Uso:
     python -m scripts.perguntar --golden --sem-reranker   # compara com a busca só vetorial
 
 O reranker segue o .env (RAG_RERANKER_ATIVO), como no /rag/ask.
+Com --golden, salva também um .jsonl com cada resposta, que o juiz da Fase 8 lê
+(python -m evals.julgar).
 """
 
 import argparse
@@ -47,6 +49,35 @@ def formatar(resultado: dict) -> str:
         f"| tentativas: {meta['tentativas']} | {meta['latencia_ms']} ms`",
     ]
     return "\n".join(linhas)
+
+
+def registro_para_o_juiz(pergunta: dict, resultado: dict) -> dict:
+    """Uma linha do .jsonl: a pergunta do golden set e o que o sistema respondeu."""
+    meta = resultado["meta"]
+    return {
+        "id": pergunta["id"],
+        "tipo": pergunta["tipo"],
+        "pergunta": pergunta["pergunta"],
+        "deve_responder": pergunta["deve_responder"],
+        "resposta_referencia": pergunta["resposta_referencia"],
+        "respondeu": resultado["encontrou_resposta"],
+        "resposta": resultado["resposta"],
+        "citacoes": [
+            {
+                "n": c["n"],
+                "chunk_id": c.get("chunk_id"),
+                "doc_id": c.get("doc_id"),
+                "secao": c.get("secao"),
+                "trecho": c["trecho"],
+            }
+            for c in resultado["citacoes"]
+        ],
+        "modelo": meta["modelo"],
+        "prompt_version": meta["prompt_version"],
+        "tentativas": meta["tentativas"],
+        "latencia_ms": meta["latencia_ms"],
+        "nota_reranker_top1": meta.get("nota_reranker_top1"),
+    }
 
 
 def percentil(valores: list[int], fracao: float) -> int:
@@ -89,6 +120,7 @@ def main():
     secoes = [f"# Respostas do golden set ({date.today()})", ""]
     modelos, respondidas, acertos_honestidade = Counter(), 0, 0
     segundas_tentativas, latencias, latencias_todas = 0, [], []
+    registros = []
     sem_resposta_certas, recusas_indevidas, recusadas_sem_llm = 0, 0, 0
     for i, pergunta in enumerate(perguntas):
         if i and args.pausa:
@@ -105,6 +137,7 @@ def main():
         segundas_tentativas += resultado["meta"]["tentativas"] > 1
         if resultado["meta"]["tentativas"]:
             latencias.append(resultado["meta"]["latencia_ms"])
+        registros.append(registro_para_o_juiz(pergunta, resultado))
         esperado = "deve responder" if pergunta["deve_responder"] else "NÃO deve responder"
         print(f"{pergunta['id']}  {'respondeu' if respondeu else 'não respondeu':14} ({esperado})")
         secoes += [
@@ -150,8 +183,13 @@ def main():
     nome = args.nome or f"respostas_{versao_do_prompt()}"
     caminho = RELATORIOS / f"{date.today()}_{nome}.md"
     caminho.write_text("\n".join(secoes[:2] + resumo + secoes[2:]), encoding="utf-8")
+    caminho_jsonl = caminho.with_suffix(".jsonl")
+    caminho_jsonl.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in registros), encoding="utf-8"
+    )
     print("\n" + "\n".join(resumo))
     print(f"Relatório salvo em {caminho}")
+    print(f"Respostas para o juiz em {caminho_jsonl}")
 
 
 if __name__ == "__main__":

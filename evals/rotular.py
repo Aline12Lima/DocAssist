@@ -19,16 +19,19 @@ from pathlib import Path
 ROTULOS = Path("evals/rotulos_humanos.jsonl")
 
 RUBRICA = """
-CORREÇÃO: a resposta responde a pergunta como a referência?
-  2 = traz o essencial e não contradiz (detalhes a mais, se corretos, não tiram ponto)
-  1 = parcial, vaga ou responde a uma pergunta parecida
-  0 = errada, contradiz a referência ou não responde
+CORREÇÃO: compare a RESPOSTA com a REFERÊNCIA.
+  2 = traz o essencial da referência e não contradiz
+      (resposta mais longa, com detalhes a mais e corretos, continua 2)
+  1 = parcial: falta parte do essencial, é vaga ou responde a uma pergunta parecida
+  0 = errada, contradiz a referência ou não responde o que foi perguntado
 
-FIDELIDADE: tudo o que a resposta afirma está nos TRECHOS CITADOS?
-  (não vale o que você sabe: verdade que não está nos trechos não é fiel)
-  2 = tudo apoiado nos trechos
-  1 = um detalhe menor sem apoio, o principal apoiado
-  0 = o principal não está nos trechos ou os contradiz
+FIDELIDADE: para cada afirmação da RESPOSTA, procure nos TRECHOS CITADOS.
+  - Tradução e paráfrase valem: resposta em português resumindo trecho em inglês é fiel.
+  - Exemplos de código copiados dos trechos são fiéis.
+  - Não vale o que você sabe: verdade que não está nos trechos não é fiel.
+  2 = todas as afirmações aparecem nos trechos
+  1 = um detalhe secundário não aparece; o principal aparece
+  0 = a afirmação principal não aparece nos trechos, ou os contradiz
 """
 
 

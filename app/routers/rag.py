@@ -24,6 +24,7 @@ from app.schemas.responses import (
     SearchResult,
 )
 from app.services.llm.cadeia import criar_cadeia
+from app.services.metricas import registrar_bloqueio, registrar_resposta, registrar_voto
 from app.services.rag.cache import (
     buscar_resposta,
     guardar_resposta,
@@ -101,6 +102,7 @@ def limitar_perguntas(
     """Autentica e conta a pergunta; passou do limite por minuto, 429."""
     uso = registrar_uso(redis_cliente, cliente, settings.RATE_LIMIT_PERGUNTAS_POR_MINUTO)
     if not uso.permitido:
+        registrar_bloqueio()
         raise HTTPException(
             status_code=429,
             detail=(
@@ -189,6 +191,7 @@ def ask(
     resultado["interacao_id"] = registrar_interacao(
         db, resultado, filtros, versao, do_cache=resultado["meta"]["cache"]
     )
+    registrar_resposta(resultado, rota="ask")
     return resultado
 
 
@@ -265,6 +268,7 @@ def ask_stream(
                 )
             finally:
                 db.close()
+            registrar_resposta(resultado, rota="stream")
             yield evento_sse("fim", resultado)
         except Exception as erro:  # noqa: BLE001 - o cabeçalho 200 já foi enviado
             logger.exception("Erro no streaming do /rag/ask")
@@ -303,9 +307,11 @@ def give_feedback(body: FeedbackRequest, db: Session = Depends(get_db)):
     """Use o `interacao_id` que veio na resposta do `/rag/ask` ou do `/rag/ask/stream`.
     Votar de novo na mesma resposta troca o voto: vale o último."""
     try:
-        return registrar_feedback(db, body.interacao_id, body.util, body.comentario)
+        voto = registrar_feedback(db, body.interacao_id, body.util, body.comentario)
     except InteracaoInexistente as erro:
         raise HTTPException(status_code=404, detail="interacao_id não encontrado") from erro
+    registrar_voto(body.util)
+    return voto
 
 
 @router.get(

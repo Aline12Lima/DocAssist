@@ -161,6 +161,11 @@ class MetaResposta(BaseModel):
     reranker: str | None = Field(None, description="Modelo que reordenou os trechos")
     nota_reranker_top1: float | None = Field(None, description="Nota do melhor trecho")
     tempo_reranker_ms: int | None = None
+    tempo_busca_ms: int | None = Field(None, description="Embedding da pergunta + busca no Chroma")
+    tempo_llm_ms: int | None = Field(None, description="Do pedido ao LLM até o fim do texto")
+    tempo_primeiro_pedaco_ms: int | None = Field(
+        None, description="Só no streaming: do início do pedido até o 1º pedaço de texto"
+    )
     latencia_ms: int
     cache: bool = Field(False, description="True = resposta veio do cache, sem chamar o LLM")
     index_version: int = Field(0, description="Versão da base quando a resposta foi gerada")

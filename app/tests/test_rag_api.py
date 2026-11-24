@@ -422,3 +422,39 @@ def test_passou_do_limite_de_perguntas_da_429(cliente, monkeypatch):
     ]
 
     assert codigos == [200, 200, 429]
+
+
+# ---------- métricas e tempos por etapa
+
+
+def test_ask_informa_o_tempo_de_cada_etapa(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente)
+
+    meta = cliente.post("/rag/ask", json={"pergunta": "Quando a chave é apagada?"}).json()["meta"]
+
+    assert meta["tempo_busca_ms"] >= 0
+    assert meta["tempo_llm_ms"] >= 0
+    assert meta["tempo_primeiro_pedaco_ms"] is None  # só existe no streaming
+
+
+def test_stream_informa_o_tempo_ate_o_primeiro_pedaco(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente)
+
+    eventos = ler_eventos(
+        cliente.post("/rag/ask/stream", json={"pergunta": "Quando a chave é apagada?"}).text
+    )
+
+    assert eventos[-1][1]["meta"]["tempo_primeiro_pedaco_ms"] >= 0
+
+
+def test_metrics_mostra_as_metricas_do_rag(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente)
+    cliente.post("/rag/ask", json={"pergunta": "Quando a chave é apagada?"})
+
+    texto = cliente.get("/metrics").text
+
+    assert "docassist_rag_respostas_total" in texto
+    assert 'docassist_rag_etapa_segundos_bucket{etapa="busca"' in texto

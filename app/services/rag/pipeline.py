@@ -91,6 +91,8 @@ class Preparo:
         self.trechos = recuperar(
             pergunta, colecao, embedder, k or settings.RAG_TOP_K_CONTEXTO, filtros, reranker
         )
+        recuperacao_ms = (time.perf_counter() - self.inicio) * 1000
+        reranker_ms = reranker.ultimo_tempo_ms if reranker is not None else 0
         self.reranker = reranker
         trechos = self.trechos
         self.meta = {
@@ -105,7 +107,11 @@ class Preparo:
             "nota_reranker_top1": arredondar(trechos[0].get("pontuacao_reranker"), 2)
             if trechos
             else None,
-            "tempo_reranker_ms": int(reranker.ultimo_tempo_ms) if reranker is not None else None,
+            "tempo_reranker_ms": int(reranker_ms) if reranker is not None else None,
+            # Quanto tempo cada etapa levou (as métricas do Prometheus usam estes números)
+            "tempo_busca_ms": int(recuperacao_ms - reranker_ms),
+            "tempo_llm_ms": None,
+            "tempo_primeiro_pedaco_ms": None,
             "chunk_ids_recuperados": [t["id"] for t in trechos],
             "falha_do_llm": False,  # True = não vale guardar no cache
             "cache": False,
@@ -190,6 +196,7 @@ def responder(
         return rapido
 
     # 2. Gerar; se vier sem citações, tentar mais uma vez com a regra reforçada
+    inicio_llm = time.perf_counter()
     for reforco in (False, True):
         try:
             gerada = llm.gerar(
@@ -199,6 +206,8 @@ def responder(
             )
         except ErroDoProvedor as erro:
             return preparo.falha(erro)
+        finally:
+            preparo.meta["tempo_llm_ms"] = int((time.perf_counter() - inicio_llm) * 1000)
 
         preparo.meta["tentativas"] += 1
         preparo.meta["modelo"] = gerada.modelo
@@ -262,6 +271,7 @@ def responder_em_partes(
 
     segurar = SegurarSentinela()
     partes = []
+    inicio_llm = time.perf_counter()
     try:
         for pedaco in llm.gerar_em_partes(
             montar_mensagens(pergunta, preparo.trechos),
@@ -271,10 +281,18 @@ def responder_em_partes(
             partes.append(pedaco)
             visivel = segurar.receber(pedaco)
             if visivel:
+                if preparo.meta["tempo_primeiro_pedaco_ms"] is None:
+                    # desde o início do pedido: é o que a pessoa espera olhando a tela
+                    preparo.meta["tempo_primeiro_pedaco_ms"] = int(
+                        (time.perf_counter() - preparo.inicio) * 1000
+                    )
                 yield {"evento": "parcial", "dados": {"texto": visivel}}
     except ErroDoProvedor as erro:
+        preparo.meta["tempo_llm_ms"] = int((time.perf_counter() - inicio_llm) * 1000)
         yield {"evento": "fim", "dados": preparo.falha(erro)}
         return
+
+    preparo.meta["tempo_llm_ms"] = int((time.perf_counter() - inicio_llm) * 1000)
 
     preparo.meta["tentativas"] = 1
     preparo.meta["modelo"] = getattr(llm, "ultimo_modelo", None)

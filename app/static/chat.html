@@ -105,7 +105,7 @@
   }
   .botao-chave.ativa { border-color: var(--destaque); }
   .painel-chave {
-    display: none; width: 100%; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px;
+    display: none; flex-basis: 100%; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px;
   }
   .painel-chave.aberto { display: flex; }
   .painel-chave input {
@@ -454,6 +454,7 @@ $("painel-chave").addEventListener("submit", (evento) => {
   evento.preventDefault();
   guardarChave($("chave").value.trim());
   $("estado-chave").textContent = chaveNaMemoria ? "Chave salva neste navegador." : "";
+  if (chaveNaMemoria) setTimeout(() => $("painel-chave").classList.remove("aberto"), 900);
 });
 $("apagar-chave").addEventListener("click", () => {
   guardarChave("");

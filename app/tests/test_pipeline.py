@@ -7,7 +7,14 @@ from chromadb.config import Settings as ChromaSettings
 from app.config import settings
 from app.services.llm.base import ErroDeLimite
 from app.services.rag.geracao import montar_mensagens
-from app.services.rag.pipeline import FALHA_DO_LLM, NAO_ENCONTREI, SEM_CITACAO, responder
+from app.services.rag.pipeline import (
+    FALHA_DO_LLM,
+    NAO_ENCONTREI,
+    SEM_CITACAO,
+    SegurarSentinela,
+    responder,
+    responder_em_partes,
+)
 from app.services.rag.vetores import obter_colecao
 from app.tests.fakes import EmbedderFalso, LLMFalso, LLMQueFalha, RerankerFalso
 
@@ -193,3 +200,60 @@ def test_com_reranker_a_distancia_nao_decide_o_limiar(colecao, monkeypatch):
     resultado = responder(PERGUNTA, colecao, EmbedderFalso(), llm, k=3, reranker=RerankerFalso())
 
     assert resultado["encontrou_resposta"] is True
+
+
+# ---------- streaming
+
+
+def test_streaming_manda_pedacos_e_termina_com_o_resultado(colecao):
+    llm = LLMFalso("Resposta com fonte [1].")
+
+    eventos = list(responder_em_partes(PERGUNTA, colecao, EmbedderFalso(), llm, k=3))
+
+    parciais = [e["dados"]["texto"] for e in eventos if e["evento"] == "parcial"]
+    assert "".join(parciais) == "Resposta com fonte [1]."
+    assert eventos[-1]["evento"] == "fim"
+    assert eventos[-1]["dados"]["encontrou_resposta"] is True
+    assert eventos[-1]["dados"]["meta"]["modelo"] == "falso:modelo"
+    assert eventos[-1]["dados"]["meta"]["tentativas"] == 1
+
+
+def test_streaming_nao_mostra_o_nao_encontrado(colecao):
+    llm = LLMFalso("NÃO ENCONTRADO")
+
+    eventos = list(responder_em_partes(PERGUNTA, colecao, EmbedderFalso(), llm, k=3))
+
+    assert [e["evento"] for e in eventos] == ["fim"]
+    assert eventos[0]["dados"]["resposta"] == NAO_ENCONTREI
+
+
+def test_streaming_abaixo_do_limiar_nem_chama_o_llm(colecao, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 0.0)
+    llm = LLMFalso()
+
+    eventos = list(responder_em_partes(PERGUNTA, colecao, EmbedderFalso(), llm, k=3))
+
+    assert [e["evento"] for e in eventos] == ["fim"]
+    assert llm.mensagens_recebidas == []
+
+
+def test_streaming_com_falha_do_llm(colecao):
+    eventos = list(responder_em_partes(PERGUNTA, colecao, EmbedderFalso(), LLMQueFalha(), k=3))
+
+    assert eventos[-1]["dados"]["meta"]["falha_do_llm"] is True
+
+
+def test_streaming_sem_citacao_avisa_no_fim(colecao):
+    eventos = list(
+        responder_em_partes(PERGUNTA, colecao, EmbedderFalso(), LLMFalso("Sem fonte."), k=3)
+    )
+
+    assert eventos[-1]["dados"]["encontrou_resposta"] is False
+    assert "sem citar" in eventos[-1]["dados"]["aviso"]
+
+
+def test_segurar_sentinela_libera_texto_normal():
+    segurar = SegurarSentinela()
+    assert segurar.receber("NÃ") == ""  # ainda pode ser "NÃO ENCONTRADO"
+    assert segurar.receber("o sei") == "NÃo sei"  # não é: libera tudo
+    assert segurar.receber(" mais") == " mais"

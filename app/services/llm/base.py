@@ -1,5 +1,6 @@
 """O que todo provedor de LLM precisa oferecer, e os erros que ele pode devolver."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -24,3 +25,7 @@ class LLMProvider(Protocol):
     nome: str
 
     def gerar(self, mensagens: list[dict], max_tokens: int, temperatura: float) -> RespostaLLM: ...
+
+    def gerar_em_partes(
+        self, mensagens: list[dict], max_tokens: int, temperatura: float
+    ) -> Iterator[str]: ...

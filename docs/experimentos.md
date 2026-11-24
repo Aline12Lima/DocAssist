@@ -186,6 +186,55 @@ Metas do escopo atingidas: acerto em "sem resposta" ≥ 80% e recusa indevida �
 - **Pendências:** perguntas de dois documentos (diversificar os trechos enviados ao LLM) e
   latência (reranker mais leve ou quantizado; com pouca memória, `RAG_RERANKER_ATIVO=false`).
 
+## Fase 9 — latência: de onde vem a espera
+
+### Medição com o Prometheus (9.5)
+
+15 perguntas do golden set pelo `/rag/ask/stream` (`scripts/gerar_trafego.py`), reranker com
+20 candidatos. Medianas calculadas pelo Prometheus com `histogram_quantile`, que estima o
+valor dentro da faixa do histograma (por isso são aproximadas):
+
+| Etapa | Mediana | Parte do total |
+| --- | --- | --- |
+| busca (embedding da pergunta + Chroma) | 0,06 s | ~1% |
+| **reranker** (20 pares pergunta-trecho) | **4,75 s** | **~80%** |
+| LLM (texto inteiro, Groq) | 1,26 s | ~20% |
+| até o 1º pedaço na tela | 5,3 s | — |
+| total | 5,9 s | — |
+
+p95 até o 1º pedaço: 10,4 s. Das 15 perguntas, 12 foram respondidas pelo LLM e 3 recusadas
+pelo limiar do reranker, sem chamar o LLM.
+
+- O gargalo é o reranker, não o LLM. Enquanto ele levar ~5 s, o streaming ajuda pouco: a
+  pessoa espera olhando a tela parada e depois o texto chega quase de uma vez.
+- O tempo do reranker varia com a carga da máquina: 2,9 s por pergunta no E4_c20 (14/11) e
+  5,6 s no E6 (24/11), com a API, o Postgres, o Redis e o Prometheus rodando ao mesmo tempo.
+  Comparações de tempo só valem medidas lado a lado, nas mesmas condições.
+
+### E6 — reranker quantizado em int8: não adotado
+
+Quantização dinâmica do PyTorch (`torch.quantization.quantize_dynamic`): os pesos das camadas
+Linear passam de float32 para int8. Os dois modelos foram medidos um depois do outro, na mesma
+máquina, com 20 candidatos:
+
+| | float32 | int8 |
+| --- | --- | --- |
+| Recall@5 (trecho) | 0,90 | 0,88 |
+| MRR (trecho) | **0,82** | **0,70** |
+| Teto (candidatos) | 0,96 | 0,96 |
+| Nota média do 1º, com resposta | 6,22 | 3,01 |
+| Nota média do 1º, sem resposta | −0,28 | −1,86 |
+| Tempo do reranker por pergunta | 5,6 s | **6,0 s** |
+
+- Ficou **mais lento**, não mais rápido. A quantização dinâmica calcula a escala das ativações
+  a cada chamada; num modelo pequeno (camadas de 384 dimensões), esse custo extra come o ganho
+  da conta em int8. O ganho também depende de a CPU ter instruções para int8.
+- A qualidade caiu: o MRR passou de 0,82 para 0,70, ou seja, o trecho certo desceu de posição.
+- As notas mudaram de escala (média de 6,22 para 3,01). O limiar de 2,0 teria de ser calibrado
+  de novo.
+- Decisão: `RAG_RERANKER_QUANTIZADO=false`. O código fica no repositório, desligado e
+  documentado. Quantizar não é uma otimização garantida: precisa ser medida.
+
 ## Fase 8 — juiz com LLM (correção e fidelidade das respostas)
 
 Até a Fase 7, as métricas diziam se o trecho certo chegava ao LLM. Na Fase 8 um segundo LLM

@@ -63,3 +63,11 @@ def test_sentiment_empty_text_returns_422():
 def test_sentiment_missing_field():
     response = client.post("/nlp/sentiment", json={})
     assert response.status_code == 422
+
+
+def test_pagina_do_chat():
+    resposta = client.get("/chat")
+    assert resposta.status_code == 200
+    assert resposta.headers["content-type"].startswith("text/html")
+    assert "DocAssist" in resposta.text
+    assert "/rag/ask/stream" in resposta.text

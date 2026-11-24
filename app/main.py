@@ -1,9 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_redoc_html
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.config import settings
@@ -71,6 +72,9 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("Tabelas prontas.")
 
+    if not settings.API_KEYS.strip():
+        logger.warning("API_KEYS vazio: API aberta, sem autenticação (só para desenvolvimento).")
+
     # Os modelos de NLP são carregados sob demanda (lazy) para economizar RAM no startup
     obter_cliente()
     get_redis_client()
@@ -125,6 +129,15 @@ async def custom_redoc():
     )
 
 
+PAGINA_DO_CHAT = Path(__file__).parent / "static" / "chat.html"
+
+
+@app.get("/chat", include_in_schema=False)
+def chat():
+    """Interface de chat: uma página só, que consome /rag/ask/stream e /rag/feedback."""
+    return FileResponse(PAGINA_DO_CHAT, media_type="text/html")
+
+
 @app.get("/", tags=["health"], summary="Informacoes basicas da API")
 def root():
     """Retorna informacoes gerais sobre a API."""
@@ -133,4 +146,5 @@ def root():
         "version": settings.APP_VERSION,
         "docs": "/docs",
         "redoc": "/redoc",
+        "chat": "/chat",
     }

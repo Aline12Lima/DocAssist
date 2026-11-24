@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.sql import func
 
 from app.database.connection import Base
@@ -39,3 +39,21 @@ class RagInteracao(Base):
     index_version = Column(Integer, nullable=False)
     do_cache = Column(Boolean, nullable=False, default=False)
     criado_em = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class RagFeedback(Base):
+    """O voto da pessoa sobre uma resposta: útil (👍) ou não (👎), com um comentário opcional.
+
+    Uma linha por interação: votar de novo troca o voto (vale o último).
+    """
+
+    __tablename__ = "rag_feedback"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    interacao_id = Column(
+        String(36), ForeignKey("rag_interacoes.id"), nullable=False, unique=True, index=True
+    )
+    util = Column(Boolean, nullable=False, index=True)
+    comentario = Column(Text, nullable=True)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -5,6 +5,7 @@ camada gratuita de vários provedores funciona como uma só.
 """
 
 import logging
+from collections.abc import Iterator
 
 from app.config import settings
 from app.services.llm.base import ErroDoProvedor, LLMProvider, RespostaLLM
@@ -24,6 +25,7 @@ class CadeiaDeProvedores:
             raise ValueError("Nenhum provedor de LLM configurado (confira as chaves no .env)")
         self.provedores = provedores
         self.nome = " → ".join(p.nome for p in provedores)
+        self.ultimo_modelo: str | None = None
 
     def gerar(self, mensagens: list[dict], max_tokens: int, temperatura: float) -> RespostaLLM:
         falhas = []
@@ -33,6 +35,33 @@ class CadeiaDeProvedores:
             except ErroDoProvedor as erro:
                 logger.warning("LLM indisponível, tentando o próximo: %s", erro)
                 falhas.append(str(erro))
+        raise ErroDoProvedor("Todos os provedores falharam: " + " | ".join(falhas))
+
+    def gerar_em_partes(
+        self, mensagens: list[dict], max_tokens: int, temperatura: float
+    ) -> Iterator[str]:
+        """Streaming com a mesma cadeia. Só troca de provedor ANTES do primeiro pedaço:
+        depois disso a pessoa já está lendo a resposta, e trocar no meio misturaria
+        dois textos. `self.ultimo_modelo` diz quem respondeu.
+        """
+        falhas = []
+        for provedor in self.provedores:
+            comecou = False
+            try:
+                for pedaco in provedor.gerar_em_partes(mensagens, max_tokens, temperatura):
+                    if not comecou:
+                        self.ultimo_modelo = provedor.nome
+                        comecou = True
+                    yield pedaco
+            except ErroDoProvedor as erro:
+                if comecou:
+                    raise
+                logger.warning("LLM indisponível, tentando o próximo: %s", erro)
+                falhas.append(str(erro))
+                continue
+            if comecou:
+                return
+            falhas.append(f"{provedor.nome}: resposta vazia")
         raise ErroDoProvedor("Todos os provedores falharam: " + " | ".join(falhas))
 
 

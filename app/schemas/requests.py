@@ -103,3 +103,25 @@ class AskRequest(BaseModel):
             ]
         }
     }
+
+
+class FeedbackRequest(BaseModel):
+    """O voto sobre uma resposta do /rag/ask."""
+
+    interacao_id: str = Field(..., description="O interacao_id que veio na resposta")
+    util: bool = Field(..., description="true = a resposta ajudou (👍); false = não ajudou (👎)")
+    comentario: str | None = Field(
+        default=None, max_length=500, description="Opcional: o que estava errado ou faltou"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "interacao_id": "41d64f1a-3637-408c-b842-c2eaac38588f",
+                    "util": False,
+                    "comentario": "Não explicou como configurar o healthcheck.",
+                }
+            ]
+        }
+    }

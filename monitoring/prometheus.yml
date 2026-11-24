@@ -1,0 +1,10 @@
+# O Prometheus visita o /metrics da API a cada 5 segundos e guarda os números.
+# "api:8000" funciona porque, na rede do compose, cada serviço é encontrado pelo nome.
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: docassist
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]

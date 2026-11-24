@@ -9,6 +9,7 @@ Uso:
     python -m evals.run_eval --nome E2 --modo chunks --modelo e5small
     python -m evals.run_eval --nome E3 --modo chunks --modelo e5small --busca hibrida
     python -m evals.run_eval --nome E4 --modo chunks --modelo e5small --reranker
+    python -m evals.run_eval --nome E6 --modo chunks --modelo e5small --reranker --reranker-int8
 
 --busca escolhe como recuperar: vetorial (padrão), lexical (só BM25) ou hibrida (as duas + RRF).
 --reranker reordena os candidatos da busca com um cross-encoder antes de medir.
@@ -29,7 +30,7 @@ from app.services.rag.embeddings import MODELOS, obter_embedder
 from app.services.rag.hibrida import buscar_hibrido
 from app.services.rag.ingest import ingerir_arquivo
 from app.services.rag.lexical import IndiceBM25
-from app.services.rag.reranker import obter_reranker
+from app.services.rag.reranker import MODELO_PADRAO, obter_reranker
 from app.services.rag.vetores import buscar, obter_colecao
 
 GOLDEN_SET = Path("evals/golden_set.jsonl")
@@ -297,6 +298,7 @@ def main():
     parser.add_argument("--rrf-k", type=int, default=60)
     parser.add_argument("--reranker", action="store_true", help="reordena com cross-encoder")
     parser.add_argument("--modelo-reranker", default=None, help="padrão: o do reranker.py")
+    parser.add_argument("--reranker-int8", action="store_true", help="reranker quantizado")
     args = parser.parse_args()
 
     embedder = obter_embedder(args.modelo)
@@ -317,8 +319,8 @@ def main():
     busca = montar_busca(args, colecao, embedder)
     reranker = None
     if args.reranker:
-        reranker = (
-            obter_reranker(args.modelo_reranker) if args.modelo_reranker else obter_reranker()
+        reranker = obter_reranker(
+            args.modelo_reranker or MODELO_PADRAO, quantizado=args.reranker_int8
         )
         args.modelo_reranker = reranker.nome
         reranker.reordenar("aquecimento", [{"texto": "aquecimento"}], k=1)  # baixa/carrega antes

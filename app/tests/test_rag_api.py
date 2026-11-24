@@ -1,5 +1,7 @@
 """Testes dos endpoints do RAG com um Chroma em memória e um modelo falso."""
 
+import json
+
 import chromadb
 import pytest
 from chromadb.config import Settings as ChromaSettings
@@ -11,10 +13,12 @@ from app.main import app
 from app.routers.rag import (
     obter_colecao_rag,
     obter_embedder_rag,
+    obter_fabrica_de_sessao,
     obter_llm_rag,
     obter_redis_rag,
     obter_reranker_rag,
 )
+from app.services import seguranca
 from app.services.rag.vetores import obter_colecao
 from app.tests.fakes import (
     EmbedderFalso,
@@ -49,6 +53,7 @@ def cliente():
     app.dependency_overrides[obter_redis_rag] = lambda: redis
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[obter_reranker_rag] = lambda: None  # o modelo real não é baixado
+    app.dependency_overrides[obter_fabrica_de_sessao] = lambda: lambda: db
     cliente = TestClient(app)
     cliente.llm, cliente.redis = llm, redis
     yield cliente
@@ -249,3 +254,207 @@ def test_ask_com_nota_baixa_responde_nao_encontrei(cliente, monkeypatch):
 
     assert corpo["encontrou_resposta"] is False
     assert cliente.llm.mensagens_recebidas == []
+
+
+# ---------- /rag/ask/stream
+
+
+def ler_eventos(texto: str) -> list[tuple[str, dict]]:
+    """Separa a resposta SSE em (evento, dados)."""
+    eventos = []
+    for bloco in texto.strip().split("\n\n"):
+        linhas = dict(linha.split(": ", 1) for linha in bloco.splitlines())
+        eventos.append((linhas["event"], json.loads(linhas["data"])))
+    return eventos
+
+
+def test_stream_manda_pedacos_e_depois_o_fim(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente)
+
+    resposta = cliente.post("/rag/ask/stream", json={"pergunta": "Quando a chave é apagada?"})
+
+    assert resposta.status_code == 200
+    assert resposta.headers["content-type"].startswith("text/event-stream")
+    eventos = ler_eventos(resposta.text)
+    parciais = [dados["texto"] for nome, dados in eventos if nome == "parcial"]
+    assert len(parciais) > 1
+    assert "".join(parciais) == "Ela é apagada após o timeout [1]."
+    nome, fim = eventos[-1]
+    assert nome == "fim"
+    assert fim["encontrou_resposta"] is True
+    assert fim["citacoes"][0]["n"] == 1
+    assert fim["meta"]["modelo"] == "falso:modelo"
+    assert fim["interacao_id"]
+
+
+def test_stream_usa_o_cache_na_segunda_vez(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente)
+    cliente.post("/rag/ask/stream", json={"pergunta": "Quando a chave é apagada?"})
+
+    eventos = ler_eventos(
+        cliente.post("/rag/ask/stream", json={"pergunta": "quando a chave é apagada"}).text
+    )
+
+    assert [nome for nome, _ in eventos] == ["fim"]
+    assert eventos[0][1]["meta"]["cache"] is True
+
+
+def test_stream_com_llm_fora_do_ar_termina_com_aviso(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    app.dependency_overrides[obter_llm_rag] = lambda: LLMQueFalha()
+    enviar(cliente)
+
+    eventos = ler_eventos(cliente.post("/rag/ask/stream", json={"pergunta": "TTL?"}).text)
+
+    assert [nome for nome, _ in eventos] == ["fim"]
+    assert eventos[0][1]["encontrou_resposta"] is False
+    assert eventos[0][1]["meta"]["falha_do_llm"] is True
+
+
+def test_stream_sem_documentos_da_409(cliente):
+    resposta = cliente.post("/rag/ask/stream", json={"pergunta": "Algo?"})
+    assert resposta.status_code == 409
+
+
+# ---------- /rag/feedback
+
+
+def perguntar_e_pegar_id(cliente, monkeypatch, pergunta="Quando a chave é apagada?") -> str:
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    return cliente.post("/rag/ask", json={"pergunta": pergunta}).json()["interacao_id"]
+
+
+def test_feedback_registra_o_voto(cliente, monkeypatch):
+    enviar(cliente)
+    interacao_id = perguntar_e_pegar_id(cliente, monkeypatch)
+
+    resposta = cliente.post(
+        "/rag/feedback",
+        json={"interacao_id": interacao_id, "util": False, "comentario": "  faltou exemplo  "},
+    )
+
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["interacao_id"] == interacao_id
+    assert corpo["util"] is False
+    assert corpo["comentario"] == "faltou exemplo"
+
+
+def test_feedback_de_novo_troca_o_voto(cliente, monkeypatch):
+    enviar(cliente)
+    interacao_id = perguntar_e_pegar_id(cliente, monkeypatch)
+    primeiro = cliente.post("/rag/feedback", json={"interacao_id": interacao_id, "util": False})
+
+    segundo = cliente.post("/rag/feedback", json={"interacao_id": interacao_id, "util": True})
+
+    assert segundo.json()["id"] == primeiro.json()["id"]
+    resumo = cliente.get("/rag/feedback/resumo").json()
+    assert (resumo["votos"], resumo["uteis"], resumo["nao_uteis"]) == (1, 1, 0)
+
+
+def test_feedback_de_interacao_inexistente_da_404(cliente):
+    resposta = cliente.post("/rag/feedback", json={"interacao_id": "nao-existe", "util": True})
+    assert resposta.status_code == 404
+
+
+def test_feedback_com_comentario_longo_demais_da_422(cliente):
+    resposta = cliente.post(
+        "/rag/feedback", json={"interacao_id": "x", "util": True, "comentario": "a" * 501}
+    )
+    assert resposta.status_code == 422
+
+
+def test_resumo_lista_as_respostas_nao_uteis(cliente, monkeypatch):
+    enviar(cliente)
+    boa = perguntar_e_pegar_id(cliente, monkeypatch, "Quando a chave é apagada?")
+    ruim = perguntar_e_pegar_id(cliente, monkeypatch, "O que é TTL?")
+    cliente.post("/rag/feedback", json={"interacao_id": boa, "util": True})
+    cliente.post("/rag/feedback", json={"interacao_id": ruim, "util": False, "comentario": "vaga"})
+
+    resumo = cliente.get("/rag/feedback/resumo").json()
+
+    assert resumo["votos"] == 2
+    assert resumo["taxa_util"] == 0.5
+    assert [r["pergunta"] for r in resumo["ultimos_nao_uteis"]] == ["O que é TTL?"]
+    assert resumo["ultimos_nao_uteis"][0]["comentario"] == "vaga"
+
+
+def test_resumo_sem_votos(cliente):
+    resumo = cliente.get("/rag/feedback/resumo").json()
+    assert resumo["votos"] == 0
+    assert resumo["taxa_util"] is None
+
+
+# ---------- chave de API e limite de uso (o resto está em test_seguranca.py)
+
+
+def test_sem_chaves_configuradas_a_api_fica_aberta(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEYS", "")
+    assert cliente.get("/rag/feedback/resumo").status_code == 200
+
+
+def test_com_chaves_so_entra_quem_manda_uma_valida(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEYS", "chave-a, chave-b")
+
+    sem = cliente.get("/rag/feedback/resumo")
+    errada = cliente.get("/rag/feedback/resumo", headers={"X-API-Key": "chave-c"})
+    certa = cliente.get("/rag/feedback/resumo", headers={"X-API-Key": "chave-b"})
+
+    assert (sem.status_code, errada.status_code, certa.status_code) == (401, 401, 200)
+    assert sem.headers["www-authenticate"] == "ApiKey"
+
+
+def test_listar_documentos_continua_publico(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEYS", "chave-a")
+    assert cliente.get("/rag/documents").status_code == 200
+
+
+def test_passou_do_limite_de_perguntas_da_429(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    monkeypatch.setattr(settings, "RATE_LIMIT_PERGUNTAS_POR_MINUTO", 2)
+    monkeypatch.setattr(seguranca, "relogio", lambda: 600.0)  # o minuto não vira no meio
+    enviar(cliente)
+
+    codigos = [
+        cliente.post("/rag/ask", json={"pergunta": f"Pergunta {i}?"}).status_code for i in range(3)
+    ]
+
+    assert codigos == [200, 200, 429]
+
+
+# ---------- métricas e tempos por etapa
+
+
+def test_ask_informa_o_tempo_de_cada_etapa(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente)
+
+    meta = cliente.post("/rag/ask", json={"pergunta": "Quando a chave é apagada?"}).json()["meta"]
+
+    assert meta["tempo_busca_ms"] >= 0
+    assert meta["tempo_llm_ms"] >= 0
+    assert meta["tempo_primeiro_pedaco_ms"] is None  # só existe no streaming
+
+
+def test_stream_informa_o_tempo_ate_o_primeiro_pedaco(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente)
+
+    eventos = ler_eventos(
+        cliente.post("/rag/ask/stream", json={"pergunta": "Quando a chave é apagada?"}).text
+    )
+
+    assert eventos[-1][1]["meta"]["tempo_primeiro_pedaco_ms"] >= 0
+
+
+def test_metrics_mostra_as_metricas_do_rag(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    enviar(cliente)
+    cliente.post("/rag/ask", json={"pergunta": "Quando a chave é apagada?"})
+
+    texto = cliente.get("/metrics").text
+
+    assert "docassist_rag_respostas_total" in texto
+    assert 'docassist_rag_etapa_segundos_bucket{etapa="busca"' in texto

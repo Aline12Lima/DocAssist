@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     RAG_RERANKER_ATIVO: bool = True
     RAG_RERANKER_MODELO: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
     RAG_RERANKER_CANDIDATOS: int = 20
+    RAG_RERANKER_QUANTIZADO: bool = False  # true = pesos em int8 (mais rápido na CPU; E6)
     # Com o reranker ligado, é esta nota (e não a distância) que decide o "não encontrei".
     # Calibrado no E4_c20: perguntas sem resposta ficaram todas abaixo de 1.5.
     RAG_LIMIAR_RERANKER: float = 2.0
@@ -47,6 +48,10 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 800
     LLM_TEMPERATURA: float = 0.1
     LLM_TIMEOUT: float = 30.0
+    # Segurança (Fase 9.4). API_KEYS vazio = API aberta, só para desenvolvimento.
+    API_KEYS: str = ""  # várias chaves separadas por vírgula
+    RATE_LIMIT_PERGUNTAS_POR_MINUTO: int = 10
+    CONFIAR_X_FORWARDED_FOR: bool = False  # true só atrás de um proxy (ex.: Railway)
     # Juiz da Fase 8: de outra família que o modelo que responde, para não favorecer a si mesmo
     JUIZ_MODELOS: str = "gemini:gemini-3.5-flash-lite,groq:qwen/qwen3.8-27b"
     JUIZ_PROMPT_VERSAO: str = "judge_v1"

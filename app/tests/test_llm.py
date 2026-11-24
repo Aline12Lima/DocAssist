@@ -1,5 +1,7 @@
 """Testes dos provedores de LLM com respostas HTTP simuladas (nenhuma chamada de verdade)."""
 
+import json
+
 import httpx
 import pytest
 
@@ -7,6 +9,7 @@ from app.config import settings
 from app.services.llm.base import ErroDeLimite, ErroDoProvedor, RespostaLLM
 from app.services.llm.cadeia import CadeiaDeProvedores, criar_cadeia, ler_lista_de_modelos
 from app.services.llm.compativel_openai import ProvedorCompativelOpenAI
+from app.services.llm.pedacos import FiltroDePensamento
 
 MENSAGENS = [{"role": "user", "content": "oi"}]
 
@@ -141,3 +144,81 @@ def test_criar_cadeia_sem_nenhuma_chave_avisa(monkeypatch):
 
     with pytest.raises(ValueError, match="Nenhum provedor"):
         criar_cadeia()
+
+
+# ---------- streaming
+
+
+def provedor_com_stream(status: int, linhas: list[str]) -> ProvedorCompativelOpenAI:
+    corpo = "".join(f"{linha}\n\n" for linha in linhas)
+
+    def responder(pedido: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, text=corpo, headers={"content-type": "text/event-stream"})
+
+    cliente = httpx.Client(transport=httpx.MockTransport(responder))
+    return ProvedorCompativelOpenAI(
+        "groq", "https://exemplo.test/v1", "chave", "modelo-a", cliente_http=cliente
+    )
+
+
+def pedaco(texto: str) -> str:
+    return "data: " + json.dumps({"choices": [{"delta": {"content": texto}}]})
+
+
+def test_stream_junta_os_pedacos_e_para_no_done():
+    provedor = provedor_com_stream(
+        200,
+        [pedaco("Olá"), ": comentário do SSE", pedaco(" mundo [1]"), "data: [DONE]", pedaco("x")],
+    )
+    assert list(provedor.gerar_em_partes(MENSAGENS, 50, 0.1)) == ["Olá", " mundo [1]"]
+
+
+def test_stream_tira_o_pensamento_mesmo_partido():
+    provedor = provedor_com_stream(
+        200, [pedaco("<thi"), pedaco("nk>pensando..."), pedaco("</th"), pedaco("ink>Resposta")]
+    )
+    assert "".join(provedor.gerar_em_partes(MENSAGENS, 50, 0.1)) == "Resposta"
+
+
+def test_stream_429_vira_erro_de_limite():
+    provedor = provedor_com_stream(429, [])
+    with pytest.raises(ErroDeLimite):
+        list(provedor.gerar_em_partes(MENSAGENS, 50, 0.1))
+
+
+class ProvedorDePedacos:
+    def __init__(self, nome, pedacos, erro_depois=None):
+        self.nome, self.pedacos, self.erro_depois = nome, pedacos, erro_depois
+
+    def gerar_em_partes(self, mensagens, max_tokens, temperatura):
+        yield from self.pedacos
+        if self.erro_depois:
+            raise self.erro_depois
+
+
+def test_cadeia_troca_de_provedor_antes_do_primeiro_pedaco():
+    cadeia = CadeiaDeProvedores(
+        [
+            ProvedorDePedacos("a", [], ErroDeLimite("a: 429")),
+            ProvedorDePedacos("b", ["oi", " [1]"]),
+        ]
+    )
+    assert list(cadeia.gerar_em_partes(MENSAGENS, 50, 0.1)) == ["oi", " [1]"]
+    assert cadeia.ultimo_modelo == "b"
+
+
+def test_cadeia_nao_troca_depois_que_comecou():
+    cadeia = CadeiaDeProvedores(
+        [
+            ProvedorDePedacos("a", ["começo"], ErroDoProvedor("a: caiu")),
+            ProvedorDePedacos("b", ["outro texto"]),
+        ]
+    )
+    with pytest.raises(ErroDoProvedor):
+        list(cadeia.gerar_em_partes(MENSAGENS, 50, 0.1))
+
+
+def test_filtro_de_pensamento_sem_pensamento_passa_tudo():
+    filtro = FiltroDePensamento()
+    texto = filtro.filtrar("a < b e <th") + filtro.filtrar("e") + filtro.terminar()
+    assert texto == "a < b e <the"

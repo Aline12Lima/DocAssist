@@ -1,10 +1,13 @@
 """Provedor para qualquer API no formato da OpenAI (/chat/completions): Groq, Gemini e outros."""
 
+import json
 import re
+from collections.abc import Iterator
 
 import httpx
 
 from app.services.llm.base import ErroDeLimite, ErroDoProvedor, RespostaLLM
+from app.services.llm.pedacos import FiltroDePensamento
 
 # Alguns modelos "pensam em voz alta" dentro de <think>...</think>: isso não vai para o usuário.
 PENSAMENTO = re.compile(r"<think>.*?</think>", re.DOTALL)
@@ -65,6 +68,60 @@ class ProvedorCompativelOpenAI:
             tokens_entrada=uso.get("prompt_tokens", 0),
             tokens_saida=uso.get("completion_tokens", 0),
         )
+
+    def gerar_em_partes(
+        self, mensagens: list[dict], max_tokens: int, temperatura: float
+    ) -> Iterator[str]:
+        """Igual ao gerar, mas devolve o texto aos pedaços, conforme o modelo escreve.
+
+        Com "stream": true, a API responde em Server-Sent Events: uma linha
+        "data: {json}" por pedaço, com o texto novo em choices[0].delta.content,
+        e "data: [DONE]" no final.
+        """
+        corpo = {
+            "model": self.modelo,
+            "messages": mensagens,
+            "max_tokens": max_tokens,
+            "temperature": temperatura,
+            "stream": True,
+        }
+        filtro = FiltroDePensamento()
+        try:
+            with self._http.stream(
+                "POST",
+                f"{self.url_base}/chat/completions",
+                headers=self._cabecalhos(),
+                json=corpo,
+            ) as resposta:
+                if resposta.status_code == 429:
+                    raise ErroDeLimite(f"{self.nome}: limite de uso atingido (429)")
+                if resposta.status_code >= 400:
+                    resposta.read()
+                    raise ErroDoProvedor(
+                        f"{self.nome}: HTTP {resposta.status_code} {resposta.text[:200]}"
+                    )
+                for linha in resposta.iter_lines():
+                    if not linha.startswith("data:"):
+                        continue  # linhas vazias e comentários do SSE
+                    dado = linha[len("data:") :].strip()
+                    if dado == "[DONE]":
+                        break
+                    try:
+                        escolhas = json.loads(dado).get("choices") or []
+                    except json.JSONDecodeError:
+                        continue
+                    if not escolhas:
+                        continue  # alguns provedores mandam um pedaço só com o uso de tokens
+                    texto = (escolhas[0].get("delta") or {}).get("content")
+                    if texto:
+                        limpo = filtro.filtrar(texto)
+                        if limpo:
+                            yield limpo
+        except httpx.HTTPError as erro:
+            raise ErroDoProvedor(f"{self.nome}: falha de conexão ({erro})") from erro
+        resto = filtro.terminar()
+        if resto:
+            yield resto
 
     def listar_modelos(self) -> list[str]:
         """Modelos que esta chave pode usar (endpoint /models)."""

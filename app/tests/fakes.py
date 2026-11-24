@@ -44,6 +44,13 @@ class LLMFalso:
             raise resposta
         return RespostaLLM(resposta, "falso:modelo", 100, 20)
 
+    def gerar_em_partes(self, mensagens, max_tokens, temperatura):
+        """A mesma resposta, entregue em pedaços de 4 caracteres (como num streaming)."""
+        texto = self.gerar(mensagens, max_tokens, temperatura).texto
+        self.ultimo_modelo = "falso:modelo"
+        for inicio in range(0, len(texto), 4):
+            yield texto[inicio : inicio + 4]
+
 
 class LLMQueFalha(LLMFalso):
     def __init__(self):

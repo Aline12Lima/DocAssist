@@ -1,18 +1,23 @@
+import json
+import logging
 import time
 from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database.connection import get_db
-from app.schemas.requests import AskRequest, DocumentRequest, SearchRequest
+from app.database.connection import SessionLocal, get_db
+from app.schemas.requests import AskRequest, DocumentRequest, FeedbackRequest, SearchRequest
 from app.schemas.responses import (
     AskResponse,
     DocumentoInfo,
     DocumentosResponse,
     DocumentResponse,
+    FeedbackResponse,
+    FeedbackResumo,
     IngestResponse,
     InteracaoInfo,
     SearchResponse,
@@ -36,14 +41,20 @@ from app.services.rag.documentos import (
     listar_documentos,
     remover_documento,
 )
+from app.services.rag.feedback import InteracaoInexistente, registrar_feedback, resumir_feedback
 from app.services.rag.geracao import versao_do_prompt
 from app.services.rag.historico import listar_interacoes, registrar_interacao
-from app.services.rag.pipeline import assinatura_da_recuperacao, responder
+from app.services.rag.pipeline import (
+    assinatura_da_recuperacao,
+    responder,
+    responder_em_partes,
+)
 from app.services.rag.reranker import obter_reranker
 from app.services.rag.vetores import buscar
 from app.services.redis_service import get_redis_client
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # Dependências: nos testes, são trocadas por uma coleção em memória e um modelo falso.
@@ -81,6 +92,17 @@ def obter_reranker_rag():
     if not settings.RAG_RERANKER_ATIVO:
         return None
     return obter_reranker(settings.RAG_RERANKER_MODELO)
+
+
+def obter_fabrica_de_sessao():
+    """Para o streaming: a resposta continua depois que a função do endpoint termina,
+    então a sessão do banco é aberta lá dentro, na hora de registrar a interação."""
+    return SessionLocal
+
+
+def evento_sse(evento: str, dados) -> str:
+    """Um evento no formato Server-Sent Events: linhas "event:" e "data:" e uma linha vazia."""
+    return f"event: {evento}\ndata: {json.dumps(dados, ensure_ascii=False, default=str)}\n\n"
 
 
 def montar_filtros(doc_id: str | None, fonte: str | None) -> dict | None:
@@ -147,6 +169,90 @@ def ask(
     return resultado
 
 
+@router.post(
+    "/ask/stream",
+    summary="Pergunta com resposta em streaming (Server-Sent Events)",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "Eventos `parcial` (pedaços do texto) e um `fim` (resultado final)",
+        },
+        409: {"description": "Nenhum documento indexado"},
+    },
+)
+def ask_stream(
+    body: AskRequest,
+    colecao=Depends(obter_colecao_rag),
+    embedder=Depends(obter_embedder_rag),
+    llm=Depends(obter_llm_rag),
+    redis_cliente=Depends(obter_redis_rag),
+    reranker=Depends(obter_reranker_rag),
+    fabrica_de_sessao=Depends(obter_fabrica_de_sessao),
+):
+    """
+    Mesmo pipeline do `/rag/ask`, mas o texto chega **aos pedaços**, enquanto o modelo
+    escreve. A pessoa começa a ler em ~1 s em vez de esperar a resposta inteira.
+
+    Eventos:
+    - `parcial`: `{"texto": "..."}`, um pedaço da resposta (prévia, citações não conferidas);
+    - `fim`: o mesmo JSON do `/rag/ask`, com as citações conferidas e o `interacao_id`.
+      O texto do `fim` é o oficial e substitui a prévia;
+    - `erro`: `{"detalhe": "..."}`, se algo inesperado acontecer no meio do caminho.
+
+    Respostas do cache e "não encontrei" chegam direto como um único `fim`.
+    Teste com `curl -N` (o `-N` desliga o buffer e mostra os eventos conforme chegam).
+    """
+    if colecao.count() == 0:
+        raise HTTPException(status_code=409, detail="Nenhum documento indexado")
+
+    inicio = time.perf_counter()
+    filtros = montar_filtros(body.doc_id, body.fonte)
+    k = body.top_k or settings.RAG_TOP_K_CONTEXTO
+    versao = versao_do_indice(redis_cliente)
+    chave = montar_chave(
+        body.pergunta, filtros, k, versao, versao_do_prompt(), assinatura_da_recuperacao(reranker)
+    )
+
+    def eventos():
+        try:
+            resultado = buscar_resposta(redis_cliente, chave)
+            if resultado:
+                resultado["pergunta"] = body.pergunta
+                resultado["meta"]["cache"] = True
+                resultado["meta"]["latencia_ms"] = int((time.perf_counter() - inicio) * 1000)
+            else:
+                for evento in responder_em_partes(
+                    body.pergunta, colecao, embedder, llm, k=k, filtros=filtros, reranker=reranker
+                ):
+                    if evento["evento"] == "fim":
+                        resultado = evento["dados"]
+                    else:
+                        yield evento_sse(evento["evento"], evento["dados"])
+                resultado["meta"]["index_version"] = versao
+                if not resultado["meta"]["falha_do_llm"]:
+                    guardar_resposta(redis_cliente, chave, resultado, settings.RAG_CACHE_TTL_S)
+
+            resultado["meta"]["index_version"] = versao
+            db = fabrica_de_sessao()
+            try:
+                resultado["interacao_id"] = registrar_interacao(
+                    db, resultado, filtros, versao, do_cache=resultado["meta"]["cache"]
+                )
+            finally:
+                db.close()
+            yield evento_sse("fim", resultado)
+        except Exception as erro:  # noqa: BLE001 - o cabeçalho 200 já foi enviado
+            logger.exception("Erro no streaming do /rag/ask")
+            yield evento_sse("erro", {"detalhe": f"Erro inesperado: {type(erro).__name__}"})
+
+    return StreamingResponse(
+        eventos(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get(
     "/interacoes",
     response_model=list[InteracaoInfo],
@@ -159,6 +265,34 @@ def list_interactions(
 ):
     """Histórico com modelo, tokens, latência e se a resposta veio do cache."""
     return listar_interacoes(db, limite, so_sem_resposta)
+
+
+@router.post(
+    "/feedback",
+    response_model=FeedbackResponse,
+    summary="Registra se uma resposta foi útil (👍) ou não (👎)",
+    responses={404: {"description": "interacao_id não encontrado no histórico"}},
+)
+def give_feedback(body: FeedbackRequest, db: Session = Depends(get_db)):
+    """Use o `interacao_id` que veio na resposta do `/rag/ask` ou do `/rag/ask/stream`.
+    Votar de novo na mesma resposta troca o voto: vale o último."""
+    try:
+        return registrar_feedback(db, body.interacao_id, body.util, body.comentario)
+    except InteracaoInexistente as erro:
+        raise HTTPException(status_code=404, detail="interacao_id não encontrado") from erro
+
+
+@router.get(
+    "/feedback/resumo",
+    response_model=FeedbackResumo,
+    summary="Quantas respostas ajudaram e as últimas que não ajudaram",
+)
+def feedback_summary(
+    limite: int = Query(10, ge=1, le=100, description="Quantas respostas 👎 listar"),
+    db: Session = Depends(get_db),
+):
+    """As respostas com 👎 são candidatas a novas perguntas do golden set."""
+    return resumir_feedback(db, limite)
 
 
 @router.post(

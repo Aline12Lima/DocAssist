@@ -1,0 +1,27 @@
+# Simula a NUVEM na sua máquina: a imagem leve, com no máximo 512 MB de memória,
+# como no plano grátis da Railway. Usa o mesmo Postgres e o mesmo Redis do compose normal.
+#
+# Subir:  docker compose -f docker-compose.yml -f docker-compose.nuvem.yml up -d --build api-nuvem
+# Abrir:  http://localhost:8001/chat
+services:
+  api-nuvem:
+    build:
+      context: .
+      dockerfile: Dockerfile.nuvem
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://nlp_user:nlp_pass@postgres:5432/nlp_db
+      - REDIS_URL=redis://redis:6379/1  # banco 1 do Redis: cache separado da API local
+      - CONFIAR_X_FORWARDED_FOR=false  # aqui não há proxy na frente
+    volumes:
+      - ./chroma_nuvem:/data
+    mem_limit: 512m
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

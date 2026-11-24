@@ -10,3 +10,6 @@ __pycache__/
 .env
 .vscode/
 .idea/
+chroma_nuvem/
+corpus/raw/
+evals/reports/

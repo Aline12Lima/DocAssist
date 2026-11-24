@@ -1,0 +1,18 @@
+# Dependências da versão "nuvem" (deploy gratuito, Fase 9.6): sem PyTorch e sem modelos
+# locais. Embeddings pelo Gemini (RAG_EMBEDDING_MODEL=gemini) e reranker desligado.
+# As versões são as mesmas do requirements.txt.
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.0
+pydantic-settings==2.2.1
+python-dotenv==1.0.1
+httpx==0.27.0
+chromadb==0.5.0
+numpy==1.23.5
+sqlalchemy==2.0.30
+psycopg2-binary==2.9.9
+redis==5.0.1
+prometheus-fastapi-instrumentator==7.0.0
+beautifulsoup4==4.12.3
+pymupdf==1.24.10
+pyyaml==6.0.1

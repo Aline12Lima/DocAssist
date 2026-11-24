@@ -1,0 +1,42 @@
+# ============================================
+# Imagem da NUVEM (Fase 9.6): sem PyTorch e sem modelos locais
+# ============================================
+# O plano grátis da Railway dá 0,5 GB de RAM por serviço. A imagem normal (Dockerfile),
+# com PyTorch, o e5 e o reranker, usa 1,5 a 2 GB. Esta usa ~150 MB ao iniciar:
+# - embeddings pelo Gemini, por API (RAG_EMBEDDING_MODEL=gemini);
+# - reranker desligado (RAG_RERANKER_ATIVO=false);
+# - limiar de distância calibrado para o Gemini (0,32; veja docs/experimentos.md).
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Primeiro só as dependências: se o código mudar e elas não, o Docker reaproveita esta camada
+COPY requirements-nuvem.txt .
+RUN pip install -r requirements-nuvem.txt
+
+# Depois só o que a aplicação precisa para rodar (sem testes, corpus, evals ou scripts)
+COPY app ./app
+COPY prompts ./prompts
+
+# Configuração da nuvem. Variáveis definidas no painel da Railway têm prioridade.
+ENV RAG_EMBEDDING_MODEL=gemini \
+    RAG_RERANKER_ATIVO=false \
+    RAG_AQUECER_MODELO=false \
+    RAG_LIMIAR_DISTANCIA=0.32 \
+    CHROMA_PATH=/data/chroma \
+    CONFIAR_X_FORWARDED_FOR=true
+
+# Roda como root de propósito: os volumes da Railway são montados com dono root, e um
+# usuário comum não conseguiria gravar a base do Chroma em /data. É uma troca consciente.
+RUN mkdir -p /data
+
+EXPOSE 8000
+
+# Forma "exec" (lista JSON): o uvicorn vira o processo principal e recebe o sinal de parar
+# na hora, em vez de esperar 10 s. O "sh -c" só existe para ler a porta que a Railway
+# passa em $PORT (8000 quando não houver).
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

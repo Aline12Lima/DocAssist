@@ -344,6 +344,7 @@ def ingest(
     doc_id: str | None = Form(None, description="ID do documento (padrão: nome do arquivo)"),
     titulo: str | None = Form(None, description="Título (padrão: o do próprio arquivo)"),
     fonte: str | None = Form(None, description="Fonte, para filtrar buscas (ex.: docker)"),
+    url: str | None = Form(None, description="Endereço da página original, para as citações"),
     colecao=Depends(obter_colecao_rag),
     embedder=Depends(obter_embedder_rag),
     redis_cliente=Depends(obter_redis_rag),
@@ -368,7 +369,12 @@ def ingest(
     doc_id = doc_id or gerar_doc_id(arquivo.filename)
     inicio = time.perf_counter()
     resultado = ingerir_conteudo(
-        conteudo, extensao, doc_id, colecao, embedder, {"titulo": titulo, "fonte": fonte}
+        conteudo,
+        extensao,
+        doc_id,
+        colecao,
+        embedder,
+        {"titulo": titulo, "fonte": fonte, "url": url},
     )
     if resultado.chunks == 0:
         raise HTTPException(status_code=422, detail="Nenhum texto encontrado no arquivo")

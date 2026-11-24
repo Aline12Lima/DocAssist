@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     CHROMA_COLLECTION: str = "documents"
 
     # RAG
-    RAG_EMBEDDING_MODEL: str = "e5small"  # minilm | e5small
+    RAG_EMBEDDING_MODEL: str = "e5small"  # minilm | e5small | gemini (por API, sem PyTorch)
+    RAG_GEMINI_DIMENSOES: int = 768  # tamanho do vetor pedido ao gemini-embedding-001
+    RAG_GEMINI_TOKENS_POR_MINUTO: int = 25_000  # abaixo dos ~30 mil do plano grátis
     RAG_CHUNK_LIMITE: int = 250  # tokens por chunk, com o prefixo
     RAG_CHUNK_OVERLAP: int = 30
     RAG_CHUNK_MINIMO: int = 50

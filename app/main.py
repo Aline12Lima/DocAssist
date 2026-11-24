@@ -10,7 +10,12 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.config import settings
 from app.database.connection import engine
 from app.database.models import Base
-from app.routers import cache, health, history, nlp, rag
+from app.routers import cache, health, history, rag
+
+try:
+    from app.routers import nlp  # os endpoints /nlp antigos precisam do PyTorch
+except ImportError:  # na imagem da nuvem (sem PyTorch) eles ficam de fora
+    nlp = None
 from app.services.rag.documentos import embedder_principal
 from app.services.rag.reranker import obter_reranker
 from app.services.rag.vetores import obter_cliente
@@ -77,7 +82,10 @@ async def lifespan(app: FastAPI):
 
     # Os modelos de NLP são carregados sob demanda (lazy) para economizar RAM no startup
     obter_cliente()
-    get_redis_client()
+    try:
+        get_redis_client()
+    except Exception as erro:  # noqa: BLE001 - sem Redis a API funciona, só sem cache
+        logger.warning("Redis indisponível ao iniciar (%s): segue sem cache por enquanto.", erro)
 
     # O modelo de embedding do RAG é carregado agora: sem isso, a 1ª pergunta leva 10+ s
     if settings.RAG_AQUECER_MODELO:
@@ -114,7 +122,8 @@ app = FastAPI(
 Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 app.include_router(health.router, prefix="/health", tags=["health"])
-app.include_router(nlp.router, prefix="/nlp", tags=["nlp"])
+if nlp is not None:
+    app.include_router(nlp.router, prefix="/nlp", tags=["nlp"])
 app.include_router(rag.router, prefix="/rag", tags=["rag"])
 app.include_router(history.router, prefix="/history", tags=["history"])
 app.include_router(cache.router, prefix="/cache", tags=["cache"])

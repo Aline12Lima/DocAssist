@@ -79,7 +79,7 @@ class RerankerFalso:
 
 
 class RedisFalso:
-    """Imita o que o cache usa do Redis: get, setex e incr (sem expirar de verdade)."""
+    """Imita o que usamos do Redis: get, setex, incr e expire (sem expirar de verdade)."""
 
     def __init__(self):
         self.dados: dict[str, str] = {}
@@ -95,6 +95,10 @@ class RedisFalso:
     def incr(self, chave):
         self.dados[chave] = str(int(self.dados.get(chave, 0)) + 1)
         return int(self.dados[chave])
+
+    def expire(self, chave, segundos):
+        self.ttls[chave] = segundos
+        return True
 
 
 class RedisForaDoAr:

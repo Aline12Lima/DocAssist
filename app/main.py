@@ -72,6 +72,9 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("Tabelas prontas.")
 
+    if not settings.API_KEYS.strip():
+        logger.warning("API_KEYS vazio: API aberta, sem autenticação (só para desenvolvimento).")
+
     # Os modelos de NLP são carregados sob demanda (lazy) para economizar RAM no startup
     obter_cliente()
     get_redis_client()

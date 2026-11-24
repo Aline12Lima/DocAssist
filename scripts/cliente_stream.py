@@ -6,14 +6,22 @@ imprime os pedaços de texto sem esperar a resposta inteira.
 Uso (dentro do container, onde a API está em localhost:8000):
     python -m scripts.cliente_stream "Como o compose espera o banco ficar pronto?"
     python -m scripts.cliente_stream "..." --url http://localhost:8000
+    python -m scripts.cliente_stream "..." --chave MINHA_CHAVE
+
+Se a API exige chave (API_KEYS no .env), o cliente manda no cabeçalho X-API-Key.
+Sem --chave, usa a variável DOCASSIST_CHAVE ou, por conveniência no desenvolvimento
+(o cliente roda no mesmo container que a API), a primeira chave de API_KEYS.
 """
 
 import argparse
 import json
+import os
 import sys
 import time
 
 import httpx
+
+from app.config import settings
 
 
 def ler_eventos(resposta: httpx.Response):
@@ -29,11 +37,21 @@ def ler_eventos(resposta: httpx.Response):
             evento, dados = None, []
 
 
+def chave_padrao() -> str:
+    if os.environ.get("DOCASSIST_CHAVE"):
+        return os.environ["DOCASSIST_CHAVE"]
+    chaves = [c.strip() for c in settings.API_KEYS.split(",") if c.strip()]
+    return chaves[0] if chaves else ""
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("pergunta")
     parser.add_argument("--url", default="http://localhost:8000")
+    parser.add_argument("--chave", default=None, help="chave de API (cabeçalho X-API-Key)")
     args = parser.parse_args()
+    chave = args.chave if args.chave is not None else chave_padrao()
+    cabecalhos = {"X-API-Key": chave} if chave else {}
 
     inicio = time.perf_counter()
     primeiro_pedaco = None
@@ -41,6 +59,7 @@ def main():
         "POST",
         f"{args.url}/rag/ask/stream",
         json={"pergunta": args.pergunta},
+        headers=cabecalhos,
         timeout=60,
     ) as resposta:
         if resposta.status_code != 200:

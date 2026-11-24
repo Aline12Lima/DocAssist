@@ -52,6 +52,7 @@ from app.services.rag.pipeline import (
 from app.services.rag.reranker import obter_reranker
 from app.services.rag.vetores import buscar
 from app.services.redis_service import get_redis_client
+from app.services.seguranca import identificar_cliente, registrar_uso
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -94,6 +95,27 @@ def obter_reranker_rag():
     return obter_reranker(settings.RAG_RERANKER_MODELO)
 
 
+def limitar_perguntas(
+    cliente: str = Depends(identificar_cliente), redis_cliente=Depends(obter_redis_rag)
+) -> str:
+    """Autentica e conta a pergunta; passou do limite por minuto, 429."""
+    uso = registrar_uso(redis_cliente, cliente, settings.RATE_LIMIT_PERGUNTAS_POR_MINUTO)
+    if not uso.permitido:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Limite de {uso.limite} perguntas por minuto atingido. "
+                f"Tente de novo em {uso.espera_s} s."
+            ),
+            headers={"Retry-After": str(uso.espera_s)},
+        )
+    return cliente
+
+
+AUTENTICAR = [Depends(identificar_cliente)]
+LIMITAR = [Depends(limitar_perguntas)]
+
+
 def obter_fabrica_de_sessao():
     """Para o streaming: a resposta continua depois que a função do endpoint termina,
     então a sessão do banco é aberta lá dentro, na hora de registrar a interação."""
@@ -114,6 +136,7 @@ def montar_filtros(doc_id: str | None, fonte: str | None) -> dict | None:
 
 @router.post(
     "/ask",
+    dependencies=LIMITAR,
     response_model=AskResponse,
     summary="Responde a pergunta com base nos documentos, citando as fontes",
     responses={409: {"description": "Nenhum documento indexado"}},
@@ -171,6 +194,7 @@ def ask(
 
 @router.post(
     "/ask/stream",
+    dependencies=LIMITAR,
     summary="Pergunta com resposta em streaming (Server-Sent Events)",
     response_class=StreamingResponse,
     responses={
@@ -255,6 +279,7 @@ def ask_stream(
 
 @router.get(
     "/interacoes",
+    dependencies=AUTENTICAR,
     response_model=list[InteracaoInfo],
     summary="Últimas perguntas feitas ao /rag/ask",
 )
@@ -269,6 +294,7 @@ def list_interactions(
 
 @router.post(
     "/feedback",
+    dependencies=AUTENTICAR,
     response_model=FeedbackResponse,
     summary="Registra se uma resposta foi útil (👍) ou não (👎)",
     responses={404: {"description": "interacao_id não encontrado no histórico"}},
@@ -284,6 +310,7 @@ def give_feedback(body: FeedbackRequest, db: Session = Depends(get_db)):
 
 @router.get(
     "/feedback/resumo",
+    dependencies=AUTENTICAR,
     response_model=FeedbackResumo,
     summary="Quantas respostas ajudaram e as últimas que não ajudaram",
 )
@@ -297,6 +324,7 @@ def feedback_summary(
 
 @router.post(
     "/ingest",
+    dependencies=AUTENTICAR,
     response_model=IngestResponse,
     summary="Envia um arquivo (PDF, Markdown ou HTML) para a base",
     responses={
@@ -365,6 +393,7 @@ def list_documents(colecao=Depends(obter_colecao_rag)):
 
 @router.delete(
     "/documents/{doc_id}",
+    dependencies=AUTENTICAR,
     summary="Remove um documento e todos os seus chunks",
     responses={404: {"description": "Documento não encontrado"}},
 )
@@ -380,6 +409,7 @@ def delete_document(
 
 @router.post(
     "/documents",
+    dependencies=AUTENTICAR,
     response_model=DocumentResponse,
     summary="Adiciona um texto à base (use /rag/ingest para arquivos)",
     deprecated=True,
@@ -406,6 +436,7 @@ def add_doc(
 
 @router.post(
     "/search",
+    dependencies=AUTENTICAR,
     response_model=SearchResponse,
     summary="Busca os trechos mais parecidos com a pergunta",
     responses={409: {"description": "Nenhum documento indexado"}},

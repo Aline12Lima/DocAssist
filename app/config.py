@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 800
     LLM_TEMPERATURA: float = 0.1
     LLM_TIMEOUT: float = 30.0
+    # Segurança (Fase 9.4). API_KEYS vazio = API aberta, só para desenvolvimento.
+    API_KEYS: str = ""  # várias chaves separadas por vírgula
+    RATE_LIMIT_PERGUNTAS_POR_MINUTO: int = 10
+    CONFIAR_X_FORWARDED_FOR: bool = False  # true só atrás de um proxy (ex.: Railway)
     # Juiz da Fase 8: de outra família que o modelo que responde, para não favorecer a si mesmo
     JUIZ_MODELOS: str = "gemini:gemini-3.5-flash-lite,groq:qwen/qwen3.8-27b"
     JUIZ_PROMPT_VERSAO: str = "judge_v1"

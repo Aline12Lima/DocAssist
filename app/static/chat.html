@@ -100,6 +100,18 @@
     padding: 10px 16px; cursor: pointer; font-weight: 600;
   }
   .enviar:disabled { opacity: .5; cursor: default; }
+  .botao-chave {
+    background: none; border: 1px solid var(--borda); border-radius: 8px; padding: 6px 10px; cursor: pointer;
+  }
+  .botao-chave.ativa { border-color: var(--destaque); }
+  .painel-chave {
+    display: none; width: 100%; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px;
+  }
+  .painel-chave.aberto { display: flex; }
+  .painel-chave input {
+    flex: 1; min-width: 180px; font: inherit; color: inherit; background: var(--fundo);
+    border: 1px solid var(--borda); border-radius: 8px; padding: 6px 8px;
+  }
   .dica { max-width: 760px; margin: 6px auto 0; font-size: 12px; color: var(--suave); }
   @media (max-width: 560px) {
     header p { display: none; }
@@ -115,6 +127,13 @@
   <label>Fonte:
     <select id="fonte"><option value="">todas</option></select>
   </label>
+  <button type="button" class="botao-chave" id="botao-chave" title="Chave de acesso à API">🔑 Chave</button>
+  <form class="painel-chave" id="painel-chave">
+    <input id="chave" type="password" autocomplete="off" placeholder="Cole a chave de API (X-API-Key)">
+    <button type="submit" class="voto">Salvar</button>
+    <button type="button" class="voto" id="apagar-chave">Apagar</button>
+    <span id="estado-chave"></span>
+  </form>
 </header>
 
 <main id="rolagem">
@@ -184,6 +203,37 @@ function blocosDeTexto(texto, prefixo) {
   }
   fecharLista();
   return html.join("");
+}
+
+// ---------- chave de API (guardada só neste navegador)
+
+const LUGAR_DA_CHAVE = "docassist_chave";
+
+function lerChave() {
+  try { return localStorage.getItem(LUGAR_DA_CHAVE) || ""; } catch { return ""; }
+}
+
+function guardarChave(valor) {
+  try {
+    if (valor) localStorage.setItem(LUGAR_DA_CHAVE, valor);
+    else localStorage.removeItem(LUGAR_DA_CHAVE);
+  } catch { /* navegador sem armazenamento: a chave vale só até recarregar */ }
+  chaveNaMemoria = valor;
+  $("botao-chave").classList.toggle("ativa", Boolean(valor));
+}
+
+let chaveNaMemoria = lerChave();
+
+// Todo pedido à API passa por aqui: põe o JSON e, se houver, a chave
+function cabecalhos() {
+  const h = { "Content-Type": "application/json" };
+  if (chaveNaMemoria) h["X-API-Key"] = chaveNaMemoria;
+  return h;
+}
+
+function mensagemDeErro(status, detalhe) {
+  if (status === 401) return "Esta API pede uma chave de acesso. Clique em 🔑 Chave, no topo, e cole a sua.";
+  return detalhe;
 }
 
 function rolarParaOFim() { $("rolagem").scrollTop = $("rolagem").scrollHeight; }
@@ -284,7 +334,7 @@ function mostrarFinal(div, dados, prefixo) {
 async function votar(interacaoId, util, comentario) {
   const resposta = await fetch("/rag/feedback", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: cabecalhos(),
     body: JSON.stringify({ interacao_id: interacaoId, util, comentario: comentario || null }),
   });
   return resposta.ok;
@@ -339,13 +389,14 @@ async function perguntar(texto) {
   try {
     const resposta = await fetch("/rag/ask/stream", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: cabecalhos(),
       body: JSON.stringify(corpo),
     });
     if (!resposta.ok) {
       const erro = await resposta.json().catch(() => ({}));
       const detalhe = typeof erro.detail === "string" ? erro.detail : `erro HTTP ${resposta.status}`;
-      div.innerHTML = `<span class="erro">Não foi possível responder: ${escapar(detalhe)}</span>`;
+      const texto = mensagemDeErro(resposta.status, detalhe);
+      div.innerHTML = `<span class="erro">Não foi possível responder: ${escapar(texto)}</span>`;
       return;
     }
     let previa = "";
@@ -391,6 +442,24 @@ $("pergunta").addEventListener("input", (evento) => {  // a caixa cresce com o t
 document.querySelectorAll(".exemplos button").forEach((botao) =>
   botao.addEventListener("click", () => perguntar(botao.textContent))
 );
+
+$("botao-chave").classList.toggle("ativa", Boolean(chaveNaMemoria));
+$("botao-chave").addEventListener("click", () => {
+  $("painel-chave").classList.toggle("aberto");
+  $("chave").value = chaveNaMemoria;
+  $("estado-chave").textContent = chaveNaMemoria ? "Há uma chave salva." : "";
+  $("chave").focus();
+});
+$("painel-chave").addEventListener("submit", (evento) => {
+  evento.preventDefault();
+  guardarChave($("chave").value.trim());
+  $("estado-chave").textContent = chaveNaMemoria ? "Chave salva neste navegador." : "";
+});
+$("apagar-chave").addEventListener("click", () => {
+  guardarChave("");
+  $("chave").value = "";
+  $("estado-chave").textContent = "Chave apagada.";
+});
 
 // As fontes do filtro vêm dos documentos indexados
 fetch("/rag/documents")

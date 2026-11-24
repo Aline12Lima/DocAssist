@@ -18,6 +18,7 @@ from app.routers.rag import (
     obter_redis_rag,
     obter_reranker_rag,
 )
+from app.services import seguranca
 from app.services.rag.vetores import obter_colecao
 from app.tests.fakes import (
     EmbedderFalso,
@@ -384,3 +385,40 @@ def test_resumo_sem_votos(cliente):
     resumo = cliente.get("/rag/feedback/resumo").json()
     assert resumo["votos"] == 0
     assert resumo["taxa_util"] is None
+
+
+# ---------- chave de API e limite de uso (o resto está em test_seguranca.py)
+
+
+def test_sem_chaves_configuradas_a_api_fica_aberta(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEYS", "")
+    assert cliente.get("/rag/feedback/resumo").status_code == 200
+
+
+def test_com_chaves_so_entra_quem_manda_uma_valida(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEYS", "chave-a, chave-b")
+
+    sem = cliente.get("/rag/feedback/resumo")
+    errada = cliente.get("/rag/feedback/resumo", headers={"X-API-Key": "chave-c"})
+    certa = cliente.get("/rag/feedback/resumo", headers={"X-API-Key": "chave-b"})
+
+    assert (sem.status_code, errada.status_code, certa.status_code) == (401, 401, 200)
+    assert sem.headers["www-authenticate"] == "ApiKey"
+
+
+def test_listar_documentos_continua_publico(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEYS", "chave-a")
+    assert cliente.get("/rag/documents").status_code == 200
+
+
+def test_passou_do_limite_de_perguntas_da_429(cliente, monkeypatch):
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    monkeypatch.setattr(settings, "RATE_LIMIT_PERGUNTAS_POR_MINUTO", 2)
+    monkeypatch.setattr(seguranca, "relogio", lambda: 600.0)  # o minuto não vira no meio
+    enviar(cliente)
+
+    codigos = [
+        cliente.post("/rag/ask", json={"pergunta": f"Pergunta {i}?"}).status_code for i in range(3)
+    ]
+
+    assert codigos == [200, 200, 429]

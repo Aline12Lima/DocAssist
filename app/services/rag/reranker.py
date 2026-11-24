@@ -18,11 +18,34 @@ import time
 MODELO_PADRAO = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 
 
+def quantizar(modelo_torch):
+    """Quantização dinâmica para int8 (Fase 9.5, experimento E6).
+
+    Os pesos das camadas Linear (quase todo o cálculo de um transformer) passam de
+    float32 (4 bytes por número) para int8 (1 byte). A conta fica mais barata na CPU,
+    em troca de um pouco de precisão. "Dinâmica" porque a escala das ativações é
+    calculada na hora, sem precisar de dados de calibração.
+    """
+    import torch
+
+    return torch.quantization.quantize_dynamic(modelo_torch, {torch.nn.Linear}, dtype=torch.qint8)
+
+
 class Reranker:
-    def __init__(self, nome: str = MODELO_PADRAO, modelo=None, max_tokens: int = 512):
-        self.nome = nome
+    def __init__(
+        self,
+        nome: str = MODELO_PADRAO,
+        modelo=None,
+        max_tokens: int = 512,
+        quantizado: bool = False,
+    ):
+        self.modelo_base = nome
+        self.quantizado = quantizado
+        # o nome vai para o meta e para a chave do cache: int8 e float32 não se misturam
+        self.nome = f"{nome}:int8" if quantizado else nome
         self.max_tokens = max_tokens
         self._modelo = modelo  # nos testes, um modelo falso entra aqui
+        self._pronto = False
         self.ultimo_tempo_ms = 0.0
 
     @property
@@ -30,7 +53,11 @@ class Reranker:
         if self._modelo is None:
             from sentence_transformers import CrossEncoder  # carrega só quando usar
 
-            self._modelo = CrossEncoder(self.nome, max_length=self.max_tokens)
+            self._modelo = CrossEncoder(self.modelo_base, max_length=self.max_tokens)
+        if not self._pronto:
+            if self.quantizado and hasattr(self._modelo, "model"):
+                self._modelo.model = quantizar(self._modelo.model)
+            self._pronto = True
         return self._modelo
 
     def reordenar(self, consulta: str, resultados: list[dict], k: int = 5) -> list[dict]:
@@ -50,11 +77,19 @@ class Reranker:
         return pontuados[:k]
 
 
-_rerankers: dict[str, Reranker] = {}
+_rerankers: dict[tuple[str, bool], Reranker] = {}
 
 
-def obter_reranker(nome: str = MODELO_PADRAO) -> Reranker:
-    """Devolve o Reranker do modelo, carregado uma vez só."""
-    if nome not in _rerankers:
-        _rerankers[nome] = Reranker(nome)
-    return _rerankers[nome]
+def obter_reranker(nome: str = MODELO_PADRAO, quantizado: bool | None = None) -> Reranker:
+    """Devolve o Reranker do modelo, carregado uma vez só.
+
+    Sem dizer `quantizado`, segue o .env (RAG_RERANKER_QUANTIZADO).
+    """
+    if quantizado is None:
+        from app.config import settings
+
+        quantizado = settings.RAG_RERANKER_QUANTIZADO
+    chave = (nome, quantizado)
+    if chave not in _rerankers:
+        _rerankers[chave] = Reranker(nome, quantizado=quantizado)
+    return _rerankers[chave]

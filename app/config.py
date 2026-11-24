@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     RAG_RERANKER_ATIVO: bool = True
     RAG_RERANKER_MODELO: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
     RAG_RERANKER_CANDIDATOS: int = 20
+    RAG_RERANKER_QUANTIZADO: bool = False  # true = pesos em int8 (mais rápido na CPU; E6)
     # Com o reranker ligado, é esta nota (e não a distância) que decide o "não encontrei".
     # Calibrado no E4_c20: perguntas sem resposta ficaram todas abaixo de 1.5.
     RAG_LIMIAR_RERANKER: float = 2.0

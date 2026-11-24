@@ -1,6 +1,8 @@
 """Testes do reranker com um cross-encoder falso (sem baixar modelo)."""
 
-from app.services.rag.reranker import Reranker
+import pytest
+
+from app.services.rag.reranker import Reranker, obter_reranker, quantizar
 
 
 class CrossEncoderFalso:
@@ -44,3 +46,25 @@ def test_mede_o_tempo_da_ultima_chamada():
     reranker = Reranker(modelo=CrossEncoderFalso())
     reranker.reordenar("expire", candidatos(), k=1)
     assert reranker.ultimo_tempo_ms >= 0.0
+
+
+def test_nome_do_quantizado_e_diferente():
+    assert Reranker("modelo-x", modelo=CrossEncoderFalso(), quantizado=True).nome == "modelo-x:int8"
+    assert Reranker("modelo-x", modelo=CrossEncoderFalso()).nome == "modelo-x"
+
+
+def test_obter_reranker_separa_int8_de_float32():
+    assert obter_reranker("m", quantizado=True) is not obter_reranker("m", quantizado=False)
+    assert obter_reranker("m", quantizado=True) is obter_reranker("m", quantizado=True)
+
+
+def test_quantizar_troca_as_camadas_linear_por_int8():
+    torch = pytest.importorskip("torch")
+    modelo = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.ReLU(), torch.nn.Linear(8, 1))
+    entrada = torch.randn(3, 8)
+
+    quantizado = quantizar(modelo)
+
+    assert "quantized" in type(quantizado[0]).__module__
+    # o resultado muda um pouco, mas continua perto do original
+    assert torch.allclose(modelo(entrada), quantizado(entrada), atol=0.1)

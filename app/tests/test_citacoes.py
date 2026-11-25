@@ -56,6 +56,16 @@ def test_aceita_colchetes_orientais():
     assert resultado.texto == "Ele espera o healthcheck[1][3]."
 
 
+def test_aceita_o_formato_de_citacao_do_gpt_oss():
+    # visto na nuvem (Fase 9.6c): o gpt-oss citou no formato do próprio treino
+    texto = "Ele usa o nome do diretório【2†L1-L3】【1†L4-L5】."
+
+    resultado = validar_citacoes(texto, 5)
+
+    assert resultado.citados == [2, 1]
+    assert resultado.texto == "Ele usa o nome do diretório[2][1]."
+
+
 def test_citacao_grudada_no_fim_do_bloco_vai_para_a_linha_de_baixo():
     texto = "Instale:\n\n```console\n$ uv add pytest\n```[1]\n\nPronto."
 

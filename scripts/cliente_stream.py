@@ -89,6 +89,19 @@ def main():
                     print(f"{total:.1f} s. Modelo: {meta['modelo']}.")
                     if meta.get("tempo_reranker_ms") is not None:
                         print(f"Só o reranker levou {meta['tempo_reranker_ms'] / 1000:.1f} s.")
+                    # O que o SERVIDOR mediu. A diferença para os tempos acima é a rede
+                    # entre você e a API (incluindo o DNS da sua máquina).
+                    no_servidor = [
+                        f"{rotulo} {meta[campo] / 1000:.1f} s"
+                        for rotulo, campo in (
+                            ("busca", "tempo_busca_ms"),
+                            ("LLM", "tempo_llm_ms"),
+                            ("1º pedaço", "tempo_primeiro_pedaco_ms"),
+                        )
+                        if meta.get(campo) is not None
+                    ]
+                    if no_servidor:
+                        print("No servidor: " + ", ".join(no_servidor) + ".")
                 else:
                     origem = "cache" if meta["cache"] else "sem chamar o LLM"
                     print(f"\nResposta completa em {total:.1f} s ({origem}).")

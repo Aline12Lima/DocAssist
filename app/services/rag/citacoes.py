@@ -13,8 +13,9 @@ from dataclasses import dataclass
 # Aceita [1], [1][2] e também [1, 2]; guarda o espaço antes para poder removê-lo junto
 CITACAO = re.compile(r"(?P<espaco>[ \t]*)\[(?P<numeros>\d+(?:\s*,\s*\d+)*)\]")
 CODIGO = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
-# Alguns modelos escrevem 【1】 (colchetes "orientais") em vez de [1]
-COLCHETE_ORIENTAL = re.compile(r"【\s*(\d+(?:\s*,\s*\d+)*)\s*】")
+# Alguns modelos escrevem 【1】 (colchetes "orientais") em vez de [1]. O gpt-oss às vezes usa
+# o formato de citação do próprio treino, 【2†L1-L3】 (trecho 2, linhas 1 a 3): fica só o número.
+COLCHETE_ORIENTAL = re.compile(r"【\s*(\d+(?:\s*,\s*\d+)*)\s*(?:†[^】]*)?】")
 # Citação grudada no fechamento de um bloco de código (```[1]) quebra o Markdown
 CITACAO_NA_CERCA = re.compile(r"^([ \t]*```)[ \t]*((?:\[\d+\])+)[ \t]*$", re.MULTILINE)
 

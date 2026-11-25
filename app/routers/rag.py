@@ -54,7 +54,15 @@ from app.services.rag.pipeline import (
 from app.services.rag.reranker import obter_reranker
 from app.services.rag.vetores import buscar
 from app.services.redis_service import get_redis_client
-from app.services.seguranca import identificar_cliente, registrar_uso
+from app.services.seguranca import (
+    DEMO,
+    Cliente,
+    Uso,
+    identificar_cliente,
+    identificar_quem_pergunta,
+    registrar_uso,
+    registrar_uso_do_dia,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -97,26 +105,47 @@ def obter_reranker_rag():
     return obter_reranker(settings.RAG_RERANKER_MODELO)
 
 
+def barrar(uso: Uso, mensagem: str) -> None:
+    """Passou do limite: 429, com o tempo de espera no cabeçalho Retry-After."""
+    registrar_bloqueio()
+    raise HTTPException(
+        status_code=429, detail=mensagem, headers={"Retry-After": str(uso.espera_s)}
+    )
+
+
 def limitar_perguntas(
-    cliente: str = Depends(identificar_cliente), redis_cliente=Depends(obter_redis_rag)
+    cliente: Cliente = Depends(identificar_quem_pergunta), redis_cliente=Depends(obter_redis_rag)
 ) -> str:
-    """Autentica e conta a pergunta; passou do limite por minuto, 429."""
-    uso = registrar_uso(redis_cliente, cliente, settings.RATE_LIMIT_PERGUNTAS_POR_MINUTO)
+    """Autentica e conta a pergunta; passou do limite, 429.
+
+    Chave de demo: limite menor por minuto (por IP) e, depois dele, o teto do dia somando
+    todos os visitantes. A ordem importa: quem foi barrado no minuto não gasta o teto do dia.
+    """
+    demo = cliente.papel == DEMO
+    limite = (
+        settings.RATE_LIMIT_DEMO_POR_MINUTO if demo else settings.RATE_LIMIT_PERGUNTAS_POR_MINUTO
+    )
+    uso = registrar_uso(redis_cliente, cliente.id, limite)
     if not uso.permitido:
-        registrar_bloqueio()
-        raise HTTPException(
-            status_code=429,
-            detail=(
-                f"Limite de {uso.limite} perguntas por minuto atingido. "
-                f"Tente de novo em {uso.espera_s} s."
-            ),
-            headers={"Retry-After": str(uso.espera_s)},
+        barrar(
+            uso,
+            f"Limite de {uso.limite} perguntas por minuto atingido. "
+            f"Tente de novo em {uso.espera_s} s.",
         )
-    return cliente
+    if demo:
+        dia = registrar_uso_do_dia(redis_cliente, "demo", settings.LIMITE_DIARIO_DEMO)
+        if not dia.permitido:
+            barrar(
+                dia,
+                f"A demonstração atingiu o limite de {dia.limite} perguntas de hoje. "
+                "Volte amanhã ou assista ao vídeo no README.",
+            )
+    return cliente.id
 
 
-AUTENTICAR = [Depends(identificar_cliente)]
-LIMITAR = [Depends(limitar_perguntas)]
+AUTENTICAR = [Depends(identificar_cliente)]  # só a chave completa (ingerir, apagar, histórico)
+PERGUNTAR = [Depends(identificar_quem_pergunta)]  # também a chave de demo (votar)
+LIMITAR = [Depends(limitar_perguntas)]  # também a chave de demo, com limites próprios
 
 
 BUSCA_INDISPONIVEL = (
@@ -312,7 +341,7 @@ def list_interactions(
 
 @router.post(
     "/feedback",
-    dependencies=AUTENTICAR,
+    dependencies=PERGUNTAR,
     response_model=FeedbackResponse,
     summary="Registra se uma resposta foi útil (👍) ou não (👎)",
     responses={404: {"description": "interacao_id não encontrado no histórico"}},

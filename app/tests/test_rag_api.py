@@ -425,6 +425,89 @@ def test_passou_do_limite_de_perguntas_da_429(cliente, monkeypatch):
     assert codigos == [200, 200, 429]
 
 
+# ---------- demo pública: visitante sem chave (Fase 10)
+
+
+@pytest.fixture
+def com_demo(cliente, monkeypatch):
+    """Base com um documento, chave de administração "chave-a" e demo pública ligada."""
+    monkeypatch.setattr(settings, "RAG_LIMIAR_DISTANCIA", 1.5)
+    monkeypatch.setattr(seguranca, "relogio", lambda: 600.0)  # o minuto não vira no meio
+    enviar(cliente)  # ainda sem chaves: a API está aberta
+    monkeypatch.setattr(settings, "API_KEYS", "chave-a")
+    monkeypatch.setattr(settings, "DEMO_PUBLICO", True)
+    return cliente
+
+
+def perguntar_demo(cliente, texto, chave=None, ip=None):
+    cabecalhos = {}
+    if chave:
+        cabecalhos["X-API-Key"] = chave
+    if ip:
+        cabecalhos["X-Real-IP"] = ip
+    return cliente.post("/rag/ask", json={"pergunta": texto}, headers=cabecalhos)
+
+
+def test_visitante_sem_chave_pergunta_e_vota(com_demo):
+    resposta = perguntar_demo(com_demo, "Quando a chave é apagada?")
+    voto = com_demo.post(
+        "/rag/feedback", json={"interacao_id": resposta.json()["interacao_id"], "util": True}
+    )
+
+    assert resposta.status_code == 200
+    assert voto.status_code == 200
+
+
+def test_visitante_nao_administra(com_demo):
+    resumo = com_demo.get("/rag/feedback/resumo")
+    apagar = com_demo.delete("/rag/documents/guia-rapido")
+    ingerir = com_demo.post("/rag/ingest", files={"arquivo": ("x.md", MARKDOWN)})
+
+    assert (resumo.status_code, apagar.status_code, ingerir.status_code) == (401, 401, 401)
+    assert "administração" in resumo.json()["detail"]
+
+
+def test_chave_errada_nao_vira_visitante(com_demo):
+    assert perguntar_demo(com_demo, "Oi?", chave="chave-errada").status_code == 401
+
+
+def test_sem_demo_publico_visitante_precisa_de_chave(com_demo, monkeypatch):
+    monkeypatch.setattr(settings, "DEMO_PUBLICO", False)
+    assert perguntar_demo(com_demo, "Oi?").status_code == 401
+
+
+def test_visitante_tem_limite_menor_por_minuto(com_demo, monkeypatch):
+    monkeypatch.setattr(settings, "RATE_LIMIT_DEMO_POR_MINUTO", 2)
+
+    visitante = [perguntar_demo(com_demo, f"Demo {i}?").status_code for i in range(3)]
+    admin = [perguntar_demo(com_demo, f"Admin {i}?", chave="chave-a").status_code for i in range(3)]
+
+    assert visitante == [200, 200, 429]
+    assert admin == [200, 200, 200]  # a chave de administração segue o limite normal (10)
+
+
+def test_visitante_tem_limite_por_ip(com_demo, monkeypatch):
+    monkeypatch.setattr(settings, "RATE_LIMIT_DEMO_POR_MINUTO", 1)
+    monkeypatch.setattr(settings, "CONFIAR_X_FORWARDED_FOR", True)
+
+    primeira = perguntar_demo(com_demo, "Pessoa A?", ip="1.1.1.1").status_code
+    repetida = perguntar_demo(com_demo, "Pessoa A de novo?", ip="1.1.1.1").status_code
+    outra = perguntar_demo(com_demo, "Pessoa B?", ip="2.2.2.2").status_code
+
+    assert (primeira, repetida, outra) == (200, 429, 200)
+
+
+def test_visitantes_tem_teto_diario_somando_todos(com_demo, monkeypatch):
+    monkeypatch.setattr(settings, "LIMITE_DIARIO_DEMO", 2)
+    monkeypatch.setattr(settings, "CONFIAR_X_FORWARDED_FOR", True)
+
+    respostas = [perguntar_demo(com_demo, f"Visitante {i}?", ip=f"9.9.9.{i}") for i in range(3)]
+
+    assert [r.status_code for r in respostas] == [200, 200, 429]
+    assert "hoje" in respostas[-1].json()["detail"]
+    assert int(respostas[-1].headers["retry-after"]) > 60  # espera até virar o dia
+
+
 # ---------- métricas e tempos por etapa
 
 

@@ -59,6 +59,9 @@ API, dentro do projeto, consegue falar com ele.
 | `LLM_MODELOS` | a mesma lista do `.env` local | ordem da cadeia de LLMs |
 | `API_KEYS` | (segredo novo, só da nuvem) | quem pode perguntar |
 | `RATE_LIMIT_PERGUNTAS_POR_MINUTO` | `10` | protege a cota gratuita do Groq e do Gemini |
+| `DEMO_PUBLICO` | `true` | visitante sem chave pergunta e vota (demo do README) |
+| `RATE_LIMIT_DEMO_POR_MINUTO` | `3` | limite do visitante, contado por IP |
+| `LIMITE_DIARIO_DEMO` | `100` | teto do dia somando todos os visitantes |
 
 O resto (`RAG_EMBEDDING_MODEL`, `RAG_RERANKER_ATIVO`, `RAG_LIMIAR_DISTANCIA`,
 `CHROMA_PATH`, `DATABASE_URL`, `CONFIAR_X_FORWARDED_FOR`) já vem do `Dockerfile.nuvem`.
@@ -82,7 +85,9 @@ Segredos nunca entram no Git: ficam só no `.env` local (ignorado) e no painel d
    ```
    O `corpus/raw` não vai para o GitHub (licença CC BY-NC-SA dos documentos do Redis), então
    os documentos chegam como chegariam de um usuário: pelo `POST /rag/ingest`.
-8. Abrir `https://SEU-APP.up.railway.app/chat`, colar a chave da nuvem em 🔑 e perguntar.
+8. Abrir `https://SEU-APP.up.railway.app/chat` e perguntar. Com `DEMO_PUBLICO=true`, funciona
+   sem chave, com os limites de visitante; com a chave de administração em 🔑, valem os
+   limites normais.
 
 ## Simular a nuvem na máquina
 

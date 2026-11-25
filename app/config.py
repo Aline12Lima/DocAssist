@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     API_KEYS: str = ""  # várias chaves separadas por vírgula
     RATE_LIMIT_PERGUNTAS_POR_MINUTO: int = 10
     CONFIAR_X_FORWARDED_FOR: bool = False  # true só atrás de um proxy (ex.: Railway)
+    # Demo pública (Fase 10): sem chave, o visitante pode perguntar e votar, com limites.
+    DEMO_PUBLICO: bool = False
+    RATE_LIMIT_DEMO_POR_MINUTO: int = 3  # por IP
+    LIMITE_DIARIO_DEMO: int = 100  # somando todos os visitantes da demo
     # Juiz da Fase 8: de outra família que o modelo que responde, para não favorecer a si mesmo
     JUIZ_MODELOS: str = "gemini:gemini-3.5-flash-lite,groq:qwen/qwen3.8-27b"
     JUIZ_PROMPT_VERSAO: str = "judge_v1"

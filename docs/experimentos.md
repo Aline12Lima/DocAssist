@@ -315,6 +315,37 @@ Testes feitos, um de cada vez, para isolar a causa:
 - Lição: antes de otimizar o código, separe o tempo por etapa e teste uma hipótese de cada vez.
   Se fosse aceita a primeira impressão ("o Gemini é lento"), a troca de modelo não resolveria.
 
+### Medição na nuvem: Railway, plano gratuito (9.6c)
+
+Configuração: imagem leve (`Dockerfile.nuvem`), embeddings do Gemini, sem reranker, SQLite e
+Chroma no volume, Redis pela rede privada, LLM `groq:openai/gpt-oss-120b`. Medido com
+`scripts/cliente_stream.py`, que agora mostra também os tempos que o próprio servidor mediu.
+
+| Pergunta | Busca (servidor) | LLM (servidor) | 1º pedaço (servidor) | 1º pedaço (na tela) |
+| --- | --- | --- | --- | --- |
+| rede entre containers do compose | 0,3 s | 1,0 s | **1,0 s** | 6,9 s |
+| comando do Redis que remove a expiração | 0,3 s | 0,8 s | **1,0 s** | 5,5 s |
+
+| Recurso | Valor |
+| --- | --- |
+| Memória da API | ~105 a 130 MB, de 512 MB |
+| CPU em repouso | perto de 0 |
+| Custo no primeiro dia | US$ 0,0025; estimativa do mês: US$ 0,01, de US$ 1 de crédito |
+| Indexação dos 18 documentos (254 trechos) | 192 s, quase todo o tempo esperando o limite por minuto do Gemini |
+
+- No servidor, o primeiro pedaço sai em **1,0 s**. Na Fase 9.5 (local, com reranker), só o
+  reranker levava 4,75 s e o primeiro pedaço chegava em 5,3 s.
+- A diferença entre o servidor e a tela (4,5 a 6 s) é a rede de quem pergunta, e não o
+  DocAssist: é o mesmo atraso de DNS da seção anterior. Sem os tempos do servidor, a
+  conclusão teria sido "a nuvem é lenta".
+- **Achado do deploy:** o `gpt-oss-120b` às vezes cita no formato do próprio treino,
+  `【2†L1-L3】`. A validação de citações não reconhecia esse formato e descartava uma
+  resposta correta ("respondeu sem citar as fontes"). Corrigido em `citacoes.py`: o formato
+  vira `[2]`. Teste em produção pega casos que o golden set não pegou.
+- **Limites do plano gratuito que mudaram a arquitetura:** 1 volume por projeto (por isso
+  SQLite em vez de Postgres) e 0,5 GB de RAM por serviço (por isso a imagem sem PyTorch).
+  Detalhes em `docs/deploy.md`.
+
 ## Fase 8 — juiz com LLM (correção e fidelidade das respostas)
 
 Até a Fase 7, as métricas diziam se o trecho certo chegava ao LLM. Na Fase 8 um segundo LLM

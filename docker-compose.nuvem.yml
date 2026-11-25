@@ -1,0 +1,28 @@
+# Simula a NUVEM na sua máquina, do jeito que ela roda na Railway (docs/deploy.md):
+# - a imagem leve, com no máximo 512 MB de memória, como no plano grátis;
+# - Chroma e SQLite na mesma pasta /data (na Railway, o único volume do projeto);
+# - o Redis do compose normal (banco 1, para não misturar com a API local).
+#
+# Subir:  docker compose -f docker-compose.yml -f docker-compose.nuvem.yml up -d --build api-nuvem
+# Abrir:  http://localhost:8001/chat
+services:
+  api-nuvem:
+    build:
+      context: .
+      dockerfile: Dockerfile.nuvem
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    environment:
+      # "environment" vence o .env: sem isso, o DATABASE_URL do Postgres viria do .env
+      - DATABASE_URL=sqlite:////data/docassist.db
+      - REDIS_URL=redis://redis:6379/1
+      - CONFIAR_X_FORWARDED_FOR=false  # aqui não há proxy na frente
+    volumes:
+      - ./chroma_nuvem:/data
+    mem_limit: 512m
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy

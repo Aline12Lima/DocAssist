@@ -21,6 +21,8 @@ MODELOS = {
     "e5small": ConfigModelo(
         "intfloat/multilingual-e5-small", "e5small", "query: ", "passage: ", max_tokens=512
     ),
+    # Por API, sem PyTorch (Fase 9.6). Os prefixos viram taskType: veja embeddings_api.py
+    "gemini": ConfigModelo("gemini-embedding-001", "gemini", max_tokens=2048),
 }
 
 
@@ -57,9 +59,20 @@ _embedders: dict[str, Embedder] = {}
 
 
 def obter_embedder(chave: str) -> Embedder:
-    """Devolve o Embedder do modelo (minilm ou e5small), carregado uma vez só."""
+    """Devolve o Embedder do modelo (minilm, e5small ou gemini), criado uma vez só."""
     if chave not in MODELOS:
         raise ValueError(f"Modelo desconhecido: {chave}. Opções: {', '.join(MODELOS)}")
     if chave not in _embedders:
-        _embedders[chave] = Embedder(MODELOS[chave])
+        if chave == "gemini":
+            from app.config import settings
+            from app.services.rag.embeddings_api import EmbedderGemini
+
+            _embedders[chave] = EmbedderGemini(
+                MODELOS[chave],
+                settings.GEMINI_API_KEY,
+                dimensoes=settings.RAG_GEMINI_DIMENSOES,
+                tokens_por_minuto=settings.RAG_GEMINI_TOKENS_POR_MINUTO,
+            )
+        else:
+            _embedders[chave] = Embedder(MODELOS[chave])
     return _embedders[chave]

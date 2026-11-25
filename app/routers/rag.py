@@ -23,6 +23,7 @@ from app.schemas.responses import (
     SearchResponse,
     SearchResult,
 )
+from app.services.llm.base import ErroDoProvedor
 from app.services.llm.cadeia import criar_cadeia
 from app.services.metricas import registrar_bloqueio, registrar_resposta, registrar_voto
 from app.services.rag.cache import (
@@ -118,6 +119,12 @@ AUTENTICAR = [Depends(identificar_cliente)]
 LIMITAR = [Depends(limitar_perguntas)]
 
 
+BUSCA_INDISPONIVEL = (
+    "A busca está indisponível agora: não foi possível gerar o embedding da pergunta. "
+    "Tente de novo em instantes."
+)
+
+
 def obter_fabrica_de_sessao():
     """Para o streaming: a resposta continua depois que a função do endpoint termina,
     então a sessão do banco é aberta lá dentro, na hora de registrar a interação."""
@@ -180,9 +187,13 @@ def ask(
         resultado["meta"]["cache"] = True
         resultado["meta"]["latencia_ms"] = int((time.perf_counter() - inicio) * 1000)
     else:
-        resultado = responder(
-            body.pergunta, colecao, embedder, llm, k=k, filtros=filtros, reranker=reranker
-        )
+        try:
+            resultado = responder(
+                body.pergunta, colecao, embedder, llm, k=k, filtros=filtros, reranker=reranker
+            )
+        except ErroDoProvedor as erro:  # falhas do LLM já viram aviso; esta é do embedding
+            logger.warning("Embedding indisponível: %s", erro)
+            raise HTTPException(status_code=503, detail=BUSCA_INDISPONIVEL) from erro
         resultado["meta"]["index_version"] = versao
         if not resultado["meta"]["falha_do_llm"]:  # uma falha não pode ficar 24 h no cache
             guardar_resposta(redis_cliente, chave, resultado, settings.RAG_CACHE_TTL_S)
@@ -270,6 +281,9 @@ def ask_stream(
                 db.close()
             registrar_resposta(resultado, rota="stream")
             yield evento_sse("fim", resultado)
+        except ErroDoProvedor as erro:
+            logger.warning("Embedding indisponível no streaming: %s", erro)
+            yield evento_sse("erro", {"detalhe": BUSCA_INDISPONIVEL})
         except Exception as erro:  # noqa: BLE001 - o cabeçalho 200 já foi enviado
             logger.exception("Erro no streaming do /rag/ask")
             yield evento_sse("erro", {"detalhe": f"Erro inesperado: {type(erro).__name__}"})
@@ -344,6 +358,7 @@ def ingest(
     doc_id: str | None = Form(None, description="ID do documento (padrão: nome do arquivo)"),
     titulo: str | None = Form(None, description="Título (padrão: o do próprio arquivo)"),
     fonte: str | None = Form(None, description="Fonte, para filtrar buscas (ex.: docker)"),
+    url: str | None = Form(None, description="Endereço da página original, para as citações"),
     colecao=Depends(obter_colecao_rag),
     embedder=Depends(obter_embedder_rag),
     redis_cliente=Depends(obter_redis_rag),
@@ -368,7 +383,12 @@ def ingest(
     doc_id = doc_id or gerar_doc_id(arquivo.filename)
     inicio = time.perf_counter()
     resultado = ingerir_conteudo(
-        conteudo, extensao, doc_id, colecao, embedder, {"titulo": titulo, "fonte": fonte}
+        conteudo,
+        extensao,
+        doc_id,
+        colecao,
+        embedder,
+        {"titulo": titulo, "fonte": fonte, "url": url},
     )
     if resultado.chunks == 0:
         raise HTTPException(status_code=422, detail="Nenhum texto encontrado no arquivo")
@@ -464,7 +484,11 @@ def search(
 
     filtros = montar_filtros(body.doc_id, body.fonte)
 
-    resultados = buscar(body.query, colecao, embedder, k=body.top_k, filtros=filtros)
+    try:
+        resultados = buscar(body.query, colecao, embedder, k=body.top_k, filtros=filtros)
+    except ErroDoProvedor as erro:
+        logger.warning("Embedding indisponível: %s", erro)
+        raise HTTPException(status_code=503, detail=BUSCA_INDISPONIVEL) from erro
     return SearchResponse(
         query=body.query,
         results=[

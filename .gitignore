@@ -11,3 +11,4 @@ dist/
 *.egg-info/
 Dockerfile.backup
 corpus/raw/
+chroma_nuvem/

@@ -124,3 +124,12 @@ def sessao_de_teste():
     )
     Base.metadata.create_all(motor)
     return sessionmaker(bind=motor)()
+
+
+class EmbedderForaDoAr(EmbedderFalso):
+    """Indexa normalmente, mas falha ao vetorizar a pergunta (como a API do Gemini fora do ar)."""
+
+    def vetorizar_consulta(self, texto):
+        from app.services.llm.base import ErroDoProvedor
+
+        raise ErroDoProvedor("gemini-embedding: falha de conexão (Network is unreachable)")

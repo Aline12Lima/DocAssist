@@ -235,6 +235,86 @@ máquina, com 20 candidatos:
 - Decisão: `RAG_RERANKER_QUANTIZADO=false`. O código fica no repositório, desligado e
   documentado. Quantizar não é uma otimização garantida: precisa ser medida.
 
+### E7 — embeddings do Gemini, sem reranker: adotado para a nuvem
+
+O reranker é 80% da espera e precisa do PyTorch (~570 MiB de memória com a API inteira),
+o que não cabe no plano gratuito da Railway (0,5 GB por serviço). O E7 testa trocar a busca
+local (e5-small + reranker) por embeddings de uma API: `gemini-embedding-001`, com
+`taskType` diferente para pergunta (`RETRIEVAL_QUERY`) e trecho (`RETRIEVAL_DOCUMENT`),
+768 dimensões e vetores normalizados. Relatório: `evals/reports/2026-11-24_E7_gemini.md`.
+
+| | E4_c20 (e5-small + reranker) | E7 (Gemini, sem reranker) |
+| --- | --- | --- |
+| Recall@5 (trecho) | 0,90 | **0,94** |
+| MRR (trecho) | 0,82 | **0,87** |
+| Tempo de recuperação por pergunta | ~3 a 5 s (reranker na CPU) | **~0,5 s** (chamada à API) |
+| Precisa de PyTorch na API | sim | não |
+
+- A qualidade ficou igual ou melhor que a do reranker, sem o custo de CPU dele.
+- O custo passa a ser a cota da API gratuita (por minuto: tokens e requisições). Indexar os
+  226 trechos de uma vez estourou o limite de tokens por minuto (HTTP 429). Solução no
+  cliente: `LimiteDeTokens` (janela de 60 s, 25 mil tokens, abaixo do limite) e lotes menores;
+  quando o 429 vem mesmo assim, o cliente espera o tempo que a própria API sugere
+  (`retryDelay`).
+- Dependência nova: sem rede, não há busca. A API responde 503 ("busca indisponível") em vez
+  de 500, e o cliente tenta de novo nas falhas de rede, com aviso no log.
+
+### Calibração do limiar de distância para o Gemini
+
+Sem reranker, a decisão de "não encontrei" volta a usar a distância do melhor trecho. Cada
+modelo de embedding tem a sua escala, então o limiar do e5-small (0,17) não vale para o
+Gemini. `evals/calibrar_limiar.py` lê o relatório do E7 e lista as perguntas com resposta mais
+distantes e as sem resposta mais próximas.
+
+- Nas 60 perguntas, as faixas não se sobrepõem: todas as sem resposta ficaram mais distantes
+  que todas as com resposta. Limiar escolhido: **`RAG_LIMIAR_DISTANCIA=0,32`**, no meio do
+  intervalo vazio, e não colado na pergunta mais difícil (mesmo critério do E5).
+- Com o e5-small isso não acontecia (as faixas se sobrepunham); por isso o reranker era
+  necessário. Separação perfeita em 60 perguntas é um bom sinal, não uma garantia: perguntas
+  reais podem cair no meio.
+
+### Imagem leve para a nuvem (9.6b)
+
+`Dockerfile.nuvem` + `requirements-nuvem.txt`: sem torch, sem sentence-transformers e sem
+reranker; embeddings pelo Gemini. Teste local com `mem_limit: 512m` no
+`docker-compose.nuvem.yml`, para simular o limite da Railway:
+
+| Imagem | Memória em uso (`docker stats`) | Cabe em 512 MiB? |
+| --- | --- | --- |
+| API completa (e5-small + reranker) | ~569 MiB | não |
+| **API leve (Gemini)** | **~133 MiB** | **sim, com folga** |
+
+- As duas configurações convivem no mesmo código: a escolha é por variável de ambiente
+  (`RAG_EMBEDDING_MODEL`, `RAG_RERANKER_ATIVO`, `RAG_LIMIAR_DISTANCIA`).
+- Uma coleção do Chroma só serve para o modelo que a criou: trocar o embedding exige
+  reindexar (a imagem leve usa uma pasta própria, `chroma_nuvem/`).
+
+### Lição de medição: a espera que não era do projeto (DNS)
+
+Na imagem leve, a primeira pergunta levava 5 a 6 s e as seguintes, menos de 1 s. A medição
+por etapas mostrou que o código era rápido (embedding ~0,6 s, Chroma ~0,3 s, sem novas
+tentativas). O tempo estava **antes** da primeira conexão: cada nome de domínio ainda não
+resolvido levava ~5 s para virar endereço (DNS).
+
+Testes feitos, um de cada vez, para isolar a causa:
+
+| Teste | Resultado |
+| --- | --- |
+| nome já resolvido (em cache) | rápido |
+| nome novo, dentro do Docker | ~5 s |
+| nome novo, com `--dns 1.1.1.1` | ~5 s |
+| nome novo, fora do Docker | ~5 s |
+| `single-request-reopen` | ~10 s |
+| só IPv4 (A) / só IPv6 (AAAA) | 5,02 s / 5,02 s |
+
+- 5 s é o tempo padrão que o resolvedor espera antes de repetir uma consulta sem resposta: a
+  primeira consulta de cada nome se perde no caminho da rede doméstica e só a repetição volta.
+- Não é do DocAssist, nem do Docker, nem do servidor de DNS escolhido: acontece em qualquer
+  programa daquela máquina. Num servidor de nuvem não deve acontecer; a medição na Railway
+  (9.6c) confirma ou não.
+- Lição: antes de otimizar o código, separe o tempo por etapa e teste uma hipótese de cada vez.
+  Se fosse aceita a primeira impressão ("o Gemini é lento"), a troca de modelo não resolveria.
+
 ## Fase 8 — juiz com LLM (correção e fidelidade das respostas)
 
 Até a Fase 7, as métricas diziam se o trecho certo chegava ao LLM. Na Fase 8 um segundo LLM

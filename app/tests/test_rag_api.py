@@ -22,6 +22,7 @@ from app.services import seguranca
 from app.services.rag.vetores import obter_colecao
 from app.tests.fakes import (
     EmbedderFalso,
+    EmbedderForaDoAr,
     LLMFalso,
     LLMQueFalha,
     RedisFalso,
@@ -458,3 +459,34 @@ def test_metrics_mostra_as_metricas_do_rag(cliente, monkeypatch):
 
     assert "docassist_rag_respostas_total" in texto
     assert 'docassist_rag_etapa_segundos_bucket{etapa="busca"' in texto
+
+
+# ---------- embedding fora do ar (ex.: API do Gemini sem rede)
+
+
+def test_ask_com_embedding_fora_do_ar_da_503(cliente):
+    enviar(cliente)
+    app.dependency_overrides[obter_embedder_rag] = lambda: EmbedderForaDoAr()
+
+    resposta = cliente.post("/rag/ask", json={"pergunta": "Quando a chave é apagada?"})
+
+    assert resposta.status_code == 503
+    assert "indisponível" in resposta.json()["detail"]
+
+
+def test_stream_com_embedding_fora_do_ar_manda_evento_de_erro(cliente):
+    enviar(cliente)
+    app.dependency_overrides[obter_embedder_rag] = lambda: EmbedderForaDoAr()
+
+    eventos = ler_eventos(
+        cliente.post("/rag/ask/stream", json={"pergunta": "Quando a chave é apagada?"}).text
+    )
+
+    assert [nome for nome, _ in eventos] == ["erro"]
+    assert "indisponível" in eventos[0][1]["detalhe"]
+
+
+def test_search_com_embedding_fora_do_ar_da_503(cliente):
+    enviar(cliente)
+    app.dependency_overrides[obter_embedder_rag] = lambda: EmbedderForaDoAr()
+    assert cliente.post("/rag/search", json={"query": "timeout"}).status_code == 503

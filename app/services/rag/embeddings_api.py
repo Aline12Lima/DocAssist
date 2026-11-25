@@ -14,6 +14,7 @@ Diferenças em relação ao e5:
   próprio cliente espera para não passar do limite (LimiteDeTokens).
 """
 
+import logging
 import math
 import re
 import time
@@ -23,6 +24,7 @@ import httpx
 from app.services.llm.base import ErroDeLimite, ErroDoProvedor
 
 URL_GEMINI = "https://generativelanguage.googleapis.com/v1beta"
+logger = logging.getLogger(__name__)
 
 
 def normalizar(vetor: list[float]) -> list[float]:
@@ -117,14 +119,20 @@ class EmbedderGemini:
         for tentativa in range(self.tentativas):
             try:
                 resposta = self._http.post(url, headers={"x-goog-api-key": self.chave}, json=corpo)
-            except httpx.HTTPError as erro:
-                raise ErroDoProvedor(f"gemini-embedding: falha de conexão ({erro})") from erro
+            except httpx.TransportError as erro:
+                # falha de rede passageira (ex.: "Network is unreachable"): tenta de novo logo
+                if tentativa == self.tentativas - 1:
+                    raise ErroDoProvedor(f"gemini-embedding: falha de conexão ({erro})") from erro
+                logger.warning("Embedding: falha de rede (%s), tentando de novo", erro)
+                self.dormir(2**tentativa)  # 1 s, 2 s, 4 s...
+                continue
             if resposta.status_code == 429:
                 if tentativa == self.tentativas - 1:
                     raise ErroDeLimite(
                         f"gemini-embedding: limite de uso atingido (429) {resposta.text[:300]}"
                     )
                 # o que o Gemini sugerir; senão, espera exponencial: 5 s, 10 s, 20 s...
+                logger.warning("Embedding: limite de uso (429), esperando para tentar de novo")
                 self.dormir(min(espera_sugerida(resposta.text) or espera, 90) + 1)
                 espera *= 2
                 continue

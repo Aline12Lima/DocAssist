@@ -130,3 +130,42 @@ def test_espera_sugerida_e_utilidades():
     assert espera_sugerida("sem dica") is None
     assert math.isclose(sum(x * x for x in normalizar([1, 2, 2])), 1.0)
     assert estimar_tokens("O Compose espera o banco?") == 8  # 6 pedaços * 1,3 = 7,8 → 8
+
+
+def test_falha_de_rede_passageira_tenta_de_novo():
+    relogio, recebidos = Relogio(), []
+    fila = [httpx.ConnectError("Network is unreachable"), (200, vetores([1, 0]))]
+
+    def responder(pedido):
+        recebidos.append(pedido)
+        item = fila.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return httpx.Response(item[0], json=item[1])
+
+    embedder = EmbedderGemini(
+        MODELOS["gemini"],
+        "chave-teste",
+        dimensoes=2,
+        cliente_http=httpx.Client(transport=httpx.MockTransport(responder)),
+        dormir=relogio.dormir,
+        relogio=relogio,
+    )
+
+    assert embedder.vetorizar_consulta("x") == pytest.approx([1.0, 0.0])
+    assert len(recebidos) == 2
+    assert relogio.dormiu == [1]
+
+
+def test_falha_de_rede_sem_parar_vira_erro_do_provedor():
+    def responder(pedido):
+        raise httpx.ConnectError("Network is unreachable")
+
+    embedder = EmbedderGemini(
+        MODELOS["gemini"],
+        "chave-teste",
+        cliente_http=httpx.Client(transport=httpx.MockTransport(responder)),
+        dormir=lambda s: None,
+    )
+    with pytest.raises(ErroDoProvedor, match="falha de conexão"):
+        embedder.vetorizar_consulta("x")

@@ -6,7 +6,11 @@ vontade: o que não mudou não é reprocessado.
 
 Uso (dentro do container "api", onde estão o corpus e a chave):
     python -m scripts.enviar_corpus --url http://api-nuvem:8000
-    python -m scripts.enviar_corpus --url https://SEU-APP.up.railway.app --chave CHAVE
+
+Para a nuvem, a chave de produção vem da variável DOCASSIST_CHAVE (assim ela não fica
+no histórico do terminal nem aparece na tela). Da sua máquina:
+    docker compose exec -e DOCASSIST_CHAVE="$(cat ~/.docassist_chave_nuvem)" api \
+        python -m scripts.enviar_corpus --url https://SEU-APP.up.railway.app
 """
 
 import argparse

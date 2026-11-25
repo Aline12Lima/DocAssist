@@ -2,10 +2,12 @@
 # Imagem da NUVEM (Fase 9.6): sem PyTorch e sem modelos locais
 # ============================================
 # O plano grátis da Railway dá 0,5 GB de RAM por serviço. A imagem normal (Dockerfile),
-# com PyTorch, o e5 e o reranker, usa 1,5 a 2 GB. Esta usa ~150 MB ao iniciar:
+# com PyTorch, o e5 e o reranker, usa ~570 MB. Esta usa ~135 MB (medido com docker stats):
 # - embeddings pelo Gemini, por API (RAG_EMBEDDING_MODEL=gemini);
 # - reranker desligado (RAG_RERANKER_ATIVO=false);
-# - limiar de distância calibrado para o Gemini (0,32; veja docs/experimentos.md).
+# - limiar de distância calibrado para o Gemini (0,32; veja docs/experimentos.md);
+# - SQLite em vez de Postgres: o plano grátis só tem 1 volume por projeto, e ele fica com
+#   esta API (Chroma + SQLite em /data). Guia do deploy: docs/deploy.md.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -28,10 +30,11 @@ ENV RAG_EMBEDDING_MODEL=gemini \
     RAG_AQUECER_MODELO=false \
     RAG_LIMIAR_DISTANCIA=0.32 \
     CHROMA_PATH=/data/chroma \
+    DATABASE_URL=sqlite:////data/docassist.db \
     CONFIAR_X_FORWARDED_FOR=true
 
 # Roda como root de propósito: os volumes da Railway são montados com dono root, e um
-# usuário comum não conseguiria gravar a base do Chroma em /data. É uma troca consciente.
+# usuário comum não conseguiria gravar o Chroma e o SQLite em /data. É uma troca consciente.
 RUN mkdir -p /data
 
 EXPOSE 8000

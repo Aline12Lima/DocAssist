@@ -323,6 +323,6 @@ DocAssist quando o foco passou a ser o RAG. Os endpoints de NLP continuam na ver
 **Aline Lima**
 
 - GitHub: [@Aline12Lima](https://github.com/Aline12Lima)
-- LinkedIn: [Aline Lima](https://www.linkedin.com/in/aline-lima-397a84202/)
+- LinkedIn: [Aline Lima](https://www.linkedin.com/in/aline-l-397a84202/)
 
 Licença MIT.

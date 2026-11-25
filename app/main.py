@@ -73,7 +73,7 @@ TAGS_METADATA = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Criando tabelas no PostgreSQL...")
+    logger.info("Criando tabelas no banco (%s)...", engine.dialect.name)
     Base.metadata.create_all(bind=engine)
     logger.info("Tabelas prontas.")
 

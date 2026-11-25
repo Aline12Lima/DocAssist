@@ -5,10 +5,18 @@
   busca fica praticamente exata e não varia entre execuções (o problema visto no E1).
 """
 
+import logging
+
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from app.config import settings
+
+# A telemetria do Chroma está desligada (anonymized_telemetry=False), mas o Chroma 0.5.0
+# ainda chama a biblioteca posthog, e as versões novas dela mudaram a função capture().
+# O resultado é um "ERROR ... capture() takes 1 positional argument" a cada coleção aberta,
+# sem nenhum efeito real: nada é enviado. Silenciamos só esse logger.
+logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
 
 CONFIG_HNSW = {
     "hnsw:space": "cosine",

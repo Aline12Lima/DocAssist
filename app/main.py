@@ -79,6 +79,13 @@ async def lifespan(app: FastAPI):
 
     if not settings.API_KEYS.strip():
         logger.warning("API_KEYS vazio: API aberta, sem autenticação (só para desenvolvimento).")
+    elif settings.DEMO_PUBLICO:
+        logger.info(
+            "Demo pública ligada: sem chave, visitantes perguntam e votam "
+            "(%d por minuto por IP, %d por dia somando todos).",
+            settings.RATE_LIMIT_DEMO_POR_MINUTO,
+            settings.LIMITE_DIARIO_DEMO,
+        )
 
     # Os modelos de NLP são carregados sob demanda (lazy) para economizar RAM no startup
     obter_cliente()

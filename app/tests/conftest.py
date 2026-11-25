@@ -16,3 +16,6 @@ def configuracao_padrao(monkeypatch):
     monkeypatch.setattr(settings, "API_KEYS", "")
     monkeypatch.setattr(settings, "RATE_LIMIT_PERGUNTAS_POR_MINUTO", 10)
     monkeypatch.setattr(settings, "CONFIAR_X_FORWARDED_FOR", False)
+    monkeypatch.setattr(settings, "DEMO_PUBLICO", False)
+    monkeypatch.setattr(settings, "RATE_LIMIT_DEMO_POR_MINUTO", 3)
+    monkeypatch.setattr(settings, "LIMITE_DIARIO_DEMO", 100)

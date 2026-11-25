@@ -1,426 +1,328 @@
 <div align="center">
 
-# 🤖 DocAssist
+# 📚 DocAssist
 
-### API de IA construída do zero: 4 modelos ML, RAG, cache e CI/CD em produção
+### Assistente RAG para documentação técnica: pergunta em português, resposta com fonte
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=for-the-badge&logo=redis&logoColor=white)
-![Railway](https://img.shields.io/badge/Railway-Deployed-131415?style=for-the-badge&logo=railway&logoColor=white)
+![Railway](https://img.shields.io/badge/Railway-no%20ar-131415?style=for-the-badge&logo=railway&logoColor=white)
 
-![CI Status](https://github.com/Aline12Lima/DocAssist/actions/workflows/ci.yml/badge.svg)
-![Docker Pulls](https://img.shields.io/docker/pulls/aline12limaai/docassist?style=flat-square&logo=docker)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+![CI](https://github.com/Aline12Lima/DocAssist/actions/workflows/ci.yml/badge.svg)
 
-### 🌐 [Testar a API em Produção](https://nlp-project-production-4cc9.up.railway.app/docs)
+### 💬 [Testar o chat agora](https://docassist-production-71453dfd.up.railway.app/chat) · sem cadastro e sem chave
 
 </div>
 
 ---
 
-## 📖 Sobre o projeto
+## English summary
 
-Anteriormente **NLP Portfolio API**. Versão atual: **0.2.0**.
+DocAssist is a **Retrieval-Augmented Generation (RAG)** assistant for technical documentation
+(FastAPI, Docker Compose, PostgreSQL and Redis). You ask in Portuguese, it searches English
+documentation and answers **only with what the documents say, citing the source of every
+sentence**. When the answer is not in the documents, it says so instead of guessing.
 
-Pipeline completo de processamento de linguagem natural (NLP) construído do zero para portfólio, demonstrando habilidades de **engenharia de ML em produção**. A API integra 4 modelos pré-treinados do HuggingFace, implementa busca semântica (RAG) com ChromaDB, cache inteligente com Redis (18x speedup mensurado), histórico persistente em PostgreSQL, e é entregue via CI/CD completo com deploy automatizado.
-
-O projeto foi desenvolvido em **4 fases estruturadas**, cada uma com sua própria complexidade técnica, seguindo o padrão profissional de branches Git e conventional commits. Desafios reais foram enfrentados durante o desenvolvimento — desde conflitos de dependências até otimização de memória em produção — todos documentados na seção **Desafios e Soluções**.
-
----
-
-## 🚀 Testando em produção
-
-A API está no ar 24/7:
-
-| Interface | URL |
-|-----------|-----|
-| 📘 **Swagger UI (interativo)** | [/docs](https://nlp-project-production-4cc9.up.railway.app/docs) |
-| 📗 **ReDoc (leitura)** | [/redoc](https://nlp-project-production-4cc9.up.railway.app/redoc) |
-| ❤️ **Health Check** | [/health/](https://nlp-project-production-4cc9.up.railway.app/health/) |
-| 📊 **Métricas Prometheus** | [/metrics](https://nlp-project-production-4cc9.up.railway.app/metrics) |
-
-### Exemplo rápido — análise de sentimento
-
-```bash
-curl -X POST https://nlp-project-production-4cc9.up.railway.app/nlp/sentiment \
-  -H "Content-Type: application/json" \
-  -d '{"text": "This project is amazing!"}'
-```
-
-**Resposta:**
-```json
-{
-  "text": "This project is amazing!",
-  "label": "positive",
-  "score": 0.9861
-}
-```
-
-> 💡 A primeira chamada de cada endpoint pode demorar ~30s (lazy loading dos modelos). Chamadas seguintes retornam em milissegundos.
+- **Measured, not guessed:** a 60-question golden set drives every decision. Recall@5 went from
+  0.82 to 0.94 and MRR from 0.63 to 0.87.
+- **Honest answers:** 10 of 10 unanswerable questions refused, 6% false refusals; an LLM judge
+  gave full marks for correctness and faithfulness and caught 30 of 30 planted errors.
+- **Production on a free tier:** live on Railway with 512 MB of RAM, ~1 s to the first streamed
+  word on the server, about US$ 0.01 per month.
+- **Stack:** FastAPI, ChromaDB, Gemini embeddings, Groq LLMs, Redis, SQLite/PostgreSQL,
+  Prometheus, Docker, GitHub Actions, Railway.
 
 ---
 
-## 🧰 Stack técnico
+## 🎯 O problema
 
-### Backend & API
-- **[Python 3.11](https://www.python.org/)** — linguagem principal
-- **[FastAPI](https://fastapi.tiangolo.com/)** — framework web assíncrono
-- **[Uvicorn](https://www.uvicorn.org/)** — servidor ASGI
-- **[Pydantic](https://docs.pydantic.dev/)** — validação de dados
+Documentação técnica é longa, fica em inglês e responde perguntas espalhadas em várias páginas.
+Um chatbot genérico responde rápido, mas **inventa** com a mesma confiança com que acerta, e
+não diz de onde tirou a resposta.
 
-### Machine Learning & NLP
-- **[HuggingFace Transformers](https://huggingface.co/docs/transformers)** — modelos pré-treinados
-- **[PyTorch](https://pytorch.org/)** — backend ML (CPU-only)
-- **[sentence-transformers](https://www.sbert.net/)** — geração de embeddings
+O DocAssist faz o contrário:
 
-### Persistência
-- **[PostgreSQL 16](https://www.postgresql.org/)** — banco relacional (histórico)
-- **[Redis 7](https://redis.io/)** — cache em memória
-- **[ChromaDB](https://www.trychroma.com/)** — banco vetorial (RAG)
-- **[SQLAlchemy 2](https://www.sqlalchemy.org/)** — ORM
+- **Responde só com o que está nos documentos**, e cada frase técnica traz a citação `[n]` do
+  trecho de onde veio. Citações que não existem são removidas antes de chegar à tela.
+- **Diz "não encontrei"** quando nenhum trecho é parecido o bastante com a pergunta, e mostra os
+  trechos mais próximos. Isso acontece **antes** de chamar o LLM, então não gasta nada.
+- **Pergunta em português, documentos em inglês:** o modelo de embedding é multilíngue.
 
-### DevOps & Infraestrutura
-- **[Docker](https://www.docker.com/)** — containerização (multi-stage build)
-- **[Docker Compose](https://docs.docker.com/compose/)** — orquestração local
-- **[Docker Hub](https://hub.docker.com/r/aline12limaai/docassist)** — registry de imagens
-- **[Railway](https://railway.app/)** — deploy em produção
-- **[GitHub Actions](https://github.com/features/actions)** — CI/CD
-- **[Prometheus](https://prometheus.io/)** — métricas
-- **[Ruff](https://docs.astral.sh/ruff/)** — lint e formatação
-
-### Qualidade & Testes
-- **[Pytest](https://pytest.org/)** — testes automatizados
-- **Conventional Commits** — padronização Git
-- **Git Flow** — branches feature/*, merge para main
-
-### Automação & Orquestração
-- **[n8n](https://n8n.io/)** — workflows visuais integrando a API
+Base atual: 18 páginas oficiais (FastAPI, Docker Compose, PostgreSQL e Redis), divididas em 254
+trechos. A lista e as licenças estão em [`corpus/manifest.yaml`](corpus/manifest.yaml).
 
 ---
-## 🏗️ Arquitetura
+
+## 💬 Demo
+
+**[docassist-production-71453dfd.up.railway.app/chat](https://docassist-production-71453dfd.up.railway.app/chat)**
+
+![Chat do DocAssist respondendo com fontes](docs/images/chat.png)
+
+Perguntas para testar:
+
+- *O docker compose espera o banco de dados ficar pronto antes de iniciar a API?*
+- *Qual comando do Redis remove o tempo de expiração de uma chave?*
+- *Como declarar um parâmetro de query opcional no FastAPI?*
+- *Qual é a capital da França?* (fora dos documentos: o sistema deve recusar)
+
+A demo é aberta, com limites para proteger as cotas gratuitas das APIs: **3 perguntas por
+minuto por pessoa** e **100 por dia somando todos os visitantes**. Ela pode levar alguns
+segundos para responder na primeira pergunta, porque o serviço "dorme" quando ninguém usa.
+
+---
+
+## ⚙️ Como funciona
 
 ```mermaid
-graph TB
-    Client[👤 Cliente / Usuário]
-    
-    subgraph API["🐳 Container API - FastAPI"]
-        NLP[📝 Router NLP]
-        RAG[🔍 Router RAG]
-        HIST[📚 Router History]
-        CACHE[⚡ Router Cache]
-        HEALTH[❤️ Router Health]
-        
-        SERVICES[🔧 Services Layer<br/>chroma_service · redis_service · history_service]
-        
-        MODELS[🤖 4 Modelos HuggingFace<br/>Sentiment · NER · Translation · Embeddings]
-        
-        CHROMA_EMB[(💾 ChromaDB<br/>embarcado)]
-    end
-    
-    subgraph DB["🐳 Container PostgreSQL"]
-        POSTGRES[(🗄️ PostgreSQL 16<br/>Histórico)]
-    end
-    
-    subgraph CACHE_C["🐳 Container Redis"]
-        REDIS[(⚡ Redis 7<br/>Cache com TTL)]
-    end
-    
-    Client -->|HTTP REST| NLP
-    Client -->|HTTP REST| RAG
-    Client -->|HTTP REST| HIST
-    Client -->|HTTP REST| CACHE
-    Client -->|HTTP REST| HEALTH
-    
-    NLP --> SERVICES
-    RAG --> SERVICES
-    HIST --> SERVICES
-    CACHE --> SERVICES
-    
-    NLP --> MODELS
-    RAG --> MODELS
-    
-    SERVICES --> CHROMA_EMB
-    SERVICES --> POSTGRES
-    SERVICES --> REDIS
-    
-    style Client fill:#4A90E2,color:#fff
-    style API fill:#1a1a2e,color:#fff
-    style DB fill:#336791,color:#fff
-    style CACHE_C fill:#DC382D,color:#fff
-    style MODELS fill:#FFB800,color:#000
+flowchart LR
+    P["Pergunta"] --> E["Embedding da pergunta"]
+    E --> B[("Chroma<br/>254 trechos")]
+    B --> L{"O melhor trecho<br/>é parecido o bastante?"}
+    L -- "não" --> N["Não encontrei<br/>+ trechos mais próximos<br/>(sem chamar o LLM)"]
+    L -- "sim" --> G["LLM com os 5 melhores trechos<br/>Groq, com reserva no Gemini"]
+    G --> V["Confere as citações [n]<br/>e remove as inválidas"]
+    V --> S["Resposta em streaming<br/>com fontes clicáveis"]
 ```
 
-**3 containers Docker orquestrados via docker-compose:**
-
-- 🐍 **api** — FastAPI + Uvicorn + 4 modelos HuggingFace + ChromaDB embarcado
-- 🐘 **postgres** — PostgreSQL 16 para histórico de operações
-- 🔴 **redis** — Redis 7 para cache em memória (TTL 1h)
-
-
-## 📸 Interface e visualização
-
-### Swagger UI (interativo)
-![Swagger em produção](docs/images/swagger.png)
-
-### ReDoc (documentação de leitura)
-![ReDoc em produção](docs/images/redoc.png)
-
-### Deploy no Railway
-![Railway com 3 serviços](docs/images/railway.png)
-
-### Docker Hub — Publicação automática via CI
-![Docker Hub tags](docs/images/docker-hub.png)
-
-### CI/CD verde no GitHub Actions
-![GitHub Actions](docs/images/github-actions.png)
-
-### Integração com n8n (workflow visual)
-![n8n workflow](docs/images/n8n-workflow.png)
+1. **Ingestão** (`POST /rag/ingest`): PDF, Markdown ou HTML são limpos, divididos por seção em
+   trechos de até 250 tokens (com 30 de sobreposição) e transformados em vetores. Reenviar o
+   mesmo arquivo não duplica nada.
+2. **Busca:** a pergunta vira um vetor e o Chroma devolve os trechos mais próximos (distância
+   cosseno, busca exata).
+3. **Limiar:** se nem o melhor trecho é próximo o bastante, a resposta é "não encontrei". O
+   limiar foi calibrado no golden set (veja [Resultados](#-resultados)).
+4. **Geração:** o LLM recebe os 5 trechos e um prompt que proíbe informação de fora deles. Se o
+   Groq atinge o limite de uso, a cadeia passa para o próximo modelo sem erro para o usuário.
+5. **Validação:** citações para trechos inexistentes são removidas; resposta sem nenhuma citação
+   válida é descartada e o usuário vê os trechos encontrados.
+6. **Entrega:** a resposta chega aos pedaços (Server-Sent Events). Cada interação é gravada, e o
+   usuário pode votar 👍/👎 com comentário.
 
 ---
 
-## ⚡ Funcionalidades
+## 📊 Resultados
 
-### 🧠 Modelos de IA (HuggingFace)
+Todas as decisões foram medidas num **golden set de 60 perguntas** escritas à mão: 50 com
+resposta (factuais, de procedimento, de termo exato e que exigem dois documentos) e 10 sem
+resposta nos documentos. O detalhe de cada experimento está em
+[`docs/experimentos.md`](docs/experimentos.md).
 
-| Tarefa | Modelo | Exemplo |
-|--------|--------|---------|
-| **Análise de sentimento** | `cardiffnlp/twitter-roberta-base-sentiment-latest` | "I love this!" → `positive (98.6%)` |
-| **NER (entidades nomeadas)** | `dbmdz/bert-large-cased-finetuned-conll03-english` | "Aline works at Google" → `PER, ORG` |
-| **Tradução EN→PT** | `Helsinki-NLP/opus-mt-tc-big-en-pt` | "Hello world" → `Olá mundo` |
-| **Embeddings semânticos** | `sentence-transformers/all-MiniLM-L6-v2` | Texto → vetor 384 dimensões |
+### Recuperação: o trecho certo chega ao LLM?
 
-### 🔍 RAG (busca semântica)
-Adicione documentos e busque por **significado**, não por palavras-chave. Query "linguagem rápida" encontra "framework Python moderno" — sem palavras em comum, apenas similaridade semântica.
+| Experimento | Configuração | Recall@5 | MRR | Decisão |
+| --- | --- | --- | --- | --- |
+| E2 | e5-small multilíngue, chunks, só vetorial | 0,82 | 0,63 | base |
+| E3 | + busca híbrida (BM25 + RRF) | 0,64 | 0,53 | ❌ não adotada |
+| E4 | e5-small + reranker (20 candidatos) | 0,90 | 0,82 | ✅ versão local |
+| E6 | reranker quantizado em int8 | 0,88 | 0,70 | ❌ mais lento e pior |
+| **E7** | **embeddings do Gemini, sem reranker** | **0,94** | **0,87** | ✅ **versão na nuvem** |
 
-### ⚡ Cache Redis
-Todas as operações NLP passam por cache antes de rodar o modelo. Segundas chamadas retornam em **~50ms** (vs ~900ms sem cache — **18x mais rápido**).
+*Recall@5: fração das perguntas em que o trecho com a resposta está entre os 5 primeiros.
+MRR: quanto mais perto do 1º lugar ele aparece, mais perto de 1.*
 
-### 📚 Histórico completo
-Toda operação é auditada no PostgreSQL: timestamp, tipo, texto de entrada, resultado JSON. Consultável via endpoint `/history/`.
+### Geração: a resposta é honesta?
 
-### 📊 Métricas Prometheus
-Endpoint `/metrics` exposto para integração com sistemas de monitoramento (contadores de requisições, latência p50/p95/p99, códigos de status).
+| Métrica | Resultado | Meta |
+| --- | --- | --- |
+| Perguntas sem resposta corretamente recusadas | **10 de 10** | ≥ 80% |
+| Recusa indevida (havia resposta, mas recusou) | **3 de 50 (6%)** | ≤ 10% |
+| Correção e fidelidade (LLM como juiz, notas 0 a 2) | **2,00 e 2,00** | — |
+| Erros plantados de propósito que o juiz percebeu | **30 de 30** | — |
 
----
+O juiz também foi testado: ele recebeu respostas estragadas de propósito (resposta de outra
+pergunta, frase inventada, trechos trocados) para confirmar que a nota máxima não vinha de um
+juiz que aprova tudo.
 
-## 🗺️ Roadmap — 4 fases estruturadas
+### Produção (Railway, plano gratuito)
 
-### ✅ Fase 1 — Setup e base (Semanas 1-2)
-- Estrutura profissional de pastas
-- FastAPI com Swagger automático
-- Containerização com Docker + docker-compose
-- Primeiro modelo HuggingFace integrado (sentimento)
-- Testes automatizados com pytest (6 testes)
-- Git com conventional commits
-- CI básico com lint (ruff)
-
-### ✅ Fase 2 — Pipeline NLP completo (Semanas 3-4)
-- +3 modelos HuggingFace (NER, tradução, embeddings)
-- **ChromaDB** como banco vetorial embarcado
-- **RAG** — busca por similaridade semântica
-- **PostgreSQL** como container separado
-- Camada de serviços (`app/services/`)
-- Camada de banco (`app/database/` com SQLAlchemy)
-- Volumes Docker persistentes
-
-### ✅ Fase 3 — Orquestração e integrações (Semanas 5-6)
-- Workflow **n8n** integrando webhook externo à API
-- **Redis** para cache (18x speedup mensurado)
-- Endpoints de administração de cache
-- Documentação Swagger enriquecida
-- **ReDoc** como interface alternativa
-
-### ✅ Fase 4 — MLOps e deploy (Semanas 7-8)
-- **Métricas Prometheus** (endpoint `/metrics`)
-- **Docker Hub** — publicação automática via CI
-- **Otimização Docker** — imagem reduzida em **76%** (9.6GB → 2.28GB) com multi-stage build e torch CPU-only
-- **CI/CD completo** — GitHub Actions com lint + testes + auto-publish
-- **Deploy Railway** com URL pública 24/7
-- Lazy loading dos modelos para economizar RAM
+| Métrica | Valor |
+| --- | --- |
+| Até o 1º pedaço da resposta, medido no servidor | **~1,0 s** (eram 5,3 s com o reranker local) |
+| Memória da API | ~105 a 130 MB, de 512 MB |
+| Custo estimado | ~US$ 0,01 por mês |
 
 ---
 
-## 🐛 Desafios e soluções
+## 🧭 Decisões e trade-offs
 
-Bugs reais enfrentados e resolvidos durante o desenvolvimento. Este é o valor de construir um projeto de verdade, não seguir tutorial.
+- **Busca híbrida não adotada.** Ela ajuda quando pergunta e documento usam as mesmas palavras.
+  Aqui a pergunta é em português e o documento em inglês: só os termos técnicos coincidem, e o
+  BM25 empurrou para baixo bons resultados da busca vetorial (Recall@5 de 0,82 para 0,64). O
+  código continua no repositório, documentado.
+- **Reranker na versão local, Gemini na nuvem.** O reranker (um cross-encoder) melhorou muito
+  a ordem dos trechos, mas o Prometheus mostrou que ele era **80% da espera** (4,75 s) e precisa
+  do PyTorch, que não cabe em 512 MB. Os embeddings do Gemini deram qualidade igual ou melhor
+  (E7) sem esse custo.
+- **Quantização int8 rejeitada.** A expectativa era um reranker mais rápido; na prática ele ficou
+  mais lento (6,0 s contra 5,6 s) e pior (MRR de 0,82 para 0,70). Otimização também se mede.
+- **Recusar antes do LLM.** O limiar de distância foi calibrado no golden set: nas 60 perguntas,
+  todas as sem resposta ficaram mais distantes que todas as com resposta. O valor escolhido
+  (0,32) fica no meio desse intervalo, para não depender demais destas 60 perguntas.
+- **SQLite na nuvem.** O plano gratuito da Railway permite um único volume por projeto. Ele
+  ficou com a API (Chroma + SQLite), e o Postgres continua na versão local.
 
-### 1. `numpy 1.24` quebrou o ChromaDB
-**Sintoma:** `AttributeError: module 'numpy' has no attribute 'float'`
-**Causa:** `chroma-hnswlib` usava `np.float`, deprecated no numpy 1.24+
-**Solução:** Fixar `numpy==1.23.5` no `requirements.txt`
+---
 
-### 2. Modelo `opus-mt-pt-en` foi removido do HuggingFace
-**Sintoma:** `HTTPError: 404 Not Found` ao baixar
-**Causa:** Modelo foi depreciado sem aviso
-**Solução:** Migrar para `Helsinki-NLP/opus-mt-tc-big-en-pt` e ajustar direção (EN→PT)
+## 🧱 Arquitetura: local e nuvem
 
-### 3. Cache do HuggingFace duplicado
-**Sintoma:** Modelos baixavam em pastas diferentes a cada execução
-**Causa:** `HF_HOME` não estava definido
-**Solução:** Adicionar `HF_HOME=/app/models` no docker-compose
+O mesmo código roda de dois jeitos, escolhidos só por variáveis de ambiente:
 
-### 4. Conflito de porta 5432 (PostgreSQL)
-**Sintoma:** `Bind for 0.0.0.0:5432 failed: port is already allocated`
-**Causa:** Container do n8n já usava a porta
-**Solução:** Mapear PostgreSQL para `5433:5432` externamente
+| | Local (`docker-compose.yml`) | Nuvem (`Dockerfile.nuvem`) |
+| --- | --- | --- |
+| Embeddings | `multilingual-e5-small`, na CPU | `gemini-embedding-001`, por API |
+| Reranker | `mmarco-mMiniLMv2` (20 candidatos) | desligado |
+| Banco | PostgreSQL 16 | SQLite no volume |
+| Cache e limite de uso | Redis | Redis (rede privada) |
+| Métricas | Prometheus | endpoint `/metrics` |
+| Memória da API | ~570 MB | ~130 MB |
 
-### 5. Pasta `app/models/` ignorada pelo Git
-**Sintoma:** `ModuleNotFoundError: No module named 'app.models'` em produção
-**Causa:** Regra `models/` no `.gitignore` (sem barra inicial) excluía qualquer pasta com esse nome
-**Solução:** Trocar por `/models/` (só a raiz) e forçar commit com `git add -f`
+```mermaid
+flowchart LR
+    V["Visitante"] -- "HTTPS" --> A["API FastAPI<br/>(Dockerfile.nuvem)"]
+    A --- D[("Volume /data<br/>Chroma + SQLite")]
+    A -- "rede privada" --> R[("Redis<br/>cache e limites")]
+    A -- "embeddings" --> GM["Gemini"]
+    A -- "respostas" --> GQ["Groq<br/>(reserva: Gemini)"]
+    GH["GitHub main"] -- "deploy automático" --> A
+```
 
-### 6. Railway definia PORT 8080, API rodava na 8000
-**Sintoma:** "Application failed to respond" na URL pública
-**Causa:** Railway usa variável `PORT` dinâmica; o CMD do Dockerfile estava fixo em 8000
-**Solução:** Trocar CMD para `uvicorn ... --port ${PORT:-8000}` (aceita variável ou fallback)
+Cada merge na `main` passa pelo CI (lint + 212 testes) e é publicado sozinho na Railway. O passo a
+passo do deploy está em [`docs/deploy.md`](docs/deploy.md).
 
-### 7. Out of Memory no Railway
-**Sintoma:** Container morria com "Killed" ao carregar modelos
-**Causa:** Free tier tem 512MB RAM; 4 modelos consomem ~4GB
-**Solução:** **Lazy loading** — modelos carregam sob demanda, não no startup
+---
 
-### 8. Imagem Docker de 9.6GB
-**Sintoma:** Deploy lento, difícil compartilhar
-**Solução:** **Multi-stage build** + `torch` CPU-only + `.dockerignore` otimizado → **2.28GB (-76%)**
+## 🛠️ Stack
+
+| Área | Ferramentas |
+| --- | --- |
+| API | FastAPI, Pydantic, Server-Sent Events, chave de API com limite por minuto (Redis) |
+| RAG | ChromaDB (HNSW, cosseno), e5-small ou Gemini embeddings, cross-encoder, BM25 + RRF (experimental) |
+| LLM | Groq (`gpt-oss-120b`, `qwen`) com cadeia de reserva para o Gemini |
+| Avaliação | golden set de 60 perguntas, Recall@k, MRR, LLM como juiz, testes com respostas estragadas |
+| Dados | SQLAlchemy, PostgreSQL ou SQLite, Redis |
+| Observabilidade | Prometheus (tempo por etapa, respostas, bloqueios, votos) |
+| Engenharia | Docker Compose, GitHub Actions (ruff + pytest), Railway, Docker Hub |
 
 ---
 
 ## 🏃 Como rodar localmente
 
-### Pré-requisitos
-- Docker + Docker Compose
-
-### Passo a passo
+Pré-requisitos: Docker com Compose e chaves gratuitas do [Groq](https://console.groq.com) e do
+[Google AI Studio](https://aistudio.google.com) (Gemini).
 
 ```bash
-# 1. Clone o repositório
+# 1. Clonar e configurar
 git clone https://github.com/Aline12Lima/DocAssist.git
 cd DocAssist
+cp .env.example .env          # preencha GROQ_API_KEY e GEMINI_API_KEY
 
-# 2. Crie o .env a partir do exemplo
-cp .env.example .env
+# 2. Subir a API, o Postgres, o Redis e o Prometheus
+docker compose up -d --build
 
-# 3. Suba os containers
-docker compose up --build
+# 3. Baixar os documentos e indexar
+docker compose exec api python -m scripts.baixar_corpus
+docker compose exec api python -m scripts.ingerir_corpus
 
-# 4. Aguarde ~2-3 min na primeira execução (baixa modelos ~2GB)
-# Quando aparecer "Application startup complete", abra:
-# http://localhost:8000/docs
+# 4. Usar
+#    Chat:     http://localhost:8000/chat
+#    Swagger:  http://localhost:8000/docs
+#    Métricas: http://localhost:9090
 ```
 
-O ChromaDB usa `CHROMA_PATH=./chroma_data` e a coleção
-`CHROMA_COLLECTION=documents`, configuráveis no `.env`. No Compose,
-o caminho padrão corresponde ao volume persistente `/app/chroma_data`.
+Os documentos não são versionados (alguns têm licença que não permite redistribuir): o script os
+baixa das fontes oficiais.
 
-### Testando
+Para simular a nuvem na sua máquina (imagem leve, limite de 512 MB e SQLite):
 
 ```bash
-# Health check
-curl http://localhost:8000/health/
-
-# Análise de sentimento
-curl -X POST http://localhost:8000/nlp/sentiment \
-  -H "Content-Type: application/json" \
-  -d '{"text": "I love this project!"}'
-
-# Rodar testes
-docker compose exec api pytest app/tests/ -v
+docker compose -f docker-compose.yml -f docker-compose.nuvem.yml up -d --build api-nuvem
+# http://localhost:8001/chat
 ```
 
-### Usando a imagem do Docker Hub (sem clonar)
+### Testes e avaliação
 
 ```bash
-docker pull aline12limaai/docassist:latest
-docker run -p 8000:8000 aline12limaai/docassist:latest
+docker compose exec api pytest -q                                  # 212 testes, sem rede
+docker compose exec api python -m evals.run_eval --nome teste --modo chunks --modelo e5small --reranker
+docker compose exec api python -m scripts.perguntar --golden --nome teste   # respostas do golden set
+docker compose exec api python -m evals.julgar --respostas evals/reports/<arquivo>.jsonl --nome teste
 ```
 
 ---
 
-## 📡 Endpoints principais
+## 🔌 Endpoints principais
 
-### NLP (com cache)
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| POST | `/nlp/sentiment` | Análise de sentimento |
-| POST | `/nlp/ner` | Reconhecimento de entidades |
-| POST | `/nlp/translate` | Tradução EN→PT |
-| POST | `/nlp/embeddings` | Vetor semântico (384 dim) |
+| Método | Rota | Para quê | Acesso |
+| --- | --- | --- | --- |
+| `POST` | `/rag/ask/stream` | Pergunta com resposta em streaming (SSE) | público, com limite |
+| `POST` | `/rag/ask` | Pergunta com a resposta inteira (JSON) | público, com limite |
+| `POST` | `/rag/feedback` | Voto 👍/👎 numa resposta | público |
+| `GET` | `/rag/documents` | Documentos indexados | público |
+| `POST` | `/rag/ingest` | Envia um documento (PDF, MD ou HTML, ou por URL) | chave |
+| `DELETE` | `/rag/documents/{id}` | Remove um documento | chave |
+| `GET` | `/rag/interacoes` | Histórico de perguntas e respostas | chave |
+| `GET` | `/rag/feedback/resumo` | Taxa de respostas úteis e últimos 👎 | chave |
+| `GET` | `/metrics` | Métricas no formato do Prometheus | público |
 
-### RAG (busca semântica)
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| POST | `/rag/documents` | Adiciona documento indexado |
-| POST | `/rag/search` | Busca por similaridade |
-| GET | `/rag/stats` | Total de documentos |
-
-### Histórico e cache
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| GET | `/history/` | Lista operações realizadas |
-| GET | `/cache/stats` | Estatísticas do Redis |
-| DELETE | `/cache/clear` | Limpa cache |
-
-### Observabilidade
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| GET | `/health/` | Health check |
-| GET | `/metrics` | Métricas Prometheus |
-| GET | `/docs` | Swagger UI |
-| GET | `/redoc` | ReDoc |
+A chave vai no cabeçalho `X-API-Key`. A documentação interativa completa fica em `/docs`.
 
 ---
 
-## 📊 Métricas de performance
+## 🐛 Desafios e soluções
 
-| Métrica | Valor |
-|---------|-------|
-| **Tamanho da imagem Docker** | 2.28 GB (**-76%** vs versão inicial) |
-| **Speedup com cache Redis** | ~18x (911ms → 49ms) |
-| **Modelos HuggingFace** | 4 (carregamento lazy) |
-| **Dimensões dos embeddings** | 384 |
-| **Testes automatizados** | 6 (pytest) |
-| **Cobertura CI** | Lint + Testes + Deploy |
-| **Tempo médio de CI** | ~1min 30s (com cache) |
-| **Uptime em produção** | 24/7 (Railway) |
-
----
-
-## 🔮 Melhorias futuras
-
-- [ ] **Frontend SaaS** — aplicação consumindo esta API (projeto em planejamento)
-- [ ] **Integração Telegram Bot** — chatbot conectado via n8n (adiado para pós-deploy)
-- [ ] **Testes de integração** — rodar Postgres/Redis em containers no CI
-- [ ] **Rate limiting** — proteção contra abuso via Redis
-- [ ] **Autenticação JWT** — para endpoints sensíveis
-- [ ] **Volume persistente para modelos** no Railway (evitar re-download)
-- [ ] **Deploy multi-região** para menor latência
+| Problema | Causa | Solução |
+| --- | --- | --- |
+| Perguntas em português não achavam os documentos em inglês | modelo de embedding só em inglês | `multilingual-e5-small`: Recall@5 de 0,41 para 0,82 |
+| Resultados da busca mudavam entre execuções | busca aproximada do índice HNSW | `hnsw:search_ef=200`: busca exata, resultados reproduzíveis |
+| Primeira resposta levava 5 s | reranker na CPU (80% do tempo) | embeddings do Gemini e reranker desligado na nuvem |
+| HTTP 429 ao indexar com o Gemini | limite gratuito de tokens por minuto | limitador próprio (25 mil tokens/min) e espera pelo `retryDelay` |
+| API não cabia no plano gratuito | PyTorch + modelos ≈ 570 MB | imagem leve sem PyTorch: ~130 MB |
+| Plano gratuito com um volume só | Postgres e Chroma pediam um volume cada | SQLite e Chroma no mesmo volume |
+| Primeira pergunta lenta em casa, rápida no servidor | DNS da rede doméstica perdia a 1ª consulta (5 s) | cliente passou a mostrar os tempos do servidor; separar rede de processamento |
+| Resposta certa descartada em produção | o `gpt-oss` citou como `【2†L1-L3】` | validação aceita esse formato e o converte em `[2]` |
+| Testes passavam no CI e falhavam na minha máquina | dependiam das chaves do `.env` local | fixture que fixa a configuração em todo teste |
+| `numpy 1.24` quebrou o ChromaDB | `np.float` removido | `numpy==1.23.5` fixado |
 
 ---
 
-## 📜 Licença
+## 📁 Estrutura
 
-Distribuído sob a licença MIT. Veja [LICENSE](LICENSE) para detalhes.
+```
+app/
+├── routers/rag.py           # endpoints do RAG (ask, stream, ingest, feedback...)
+├── services/rag/            # parsers, chunker, embeddings, busca, pipeline, citações
+├── services/llm/            # provedores (Groq, Gemini) e cadeia de reserva
+├── services/avaliacao/      # LLM como juiz, concordância, respostas estragadas
+├── services/seguranca.py    # chave de API, demo pública e limites de uso
+├── static/chat.html         # interface de chat (HTML + JS, sem framework)
+└── tests/                   # 212 testes (LLM, embedding e Redis simulados)
+corpus/manifest.yaml         # documentos, fontes e licenças
+evals/                       # golden set, avaliação, juiz e relatórios
+prompts/                     # prompts versionados (answer_v2, judge_v1...)
+docs/                        # escopo, experimentos e deploy
+Dockerfile · Dockerfile.nuvem · docker-compose.yml · docker-compose.nuvem.yml
+```
 
 ---
 
-## 👤 Autor
+## 🕰️ Histórico
+
+O projeto começou como **NLP Portfolio API**: uma API com 4 modelos do HuggingFace (sentimento,
+entidades nomeadas, tradução e embeddings), cache no Redis e deploy com CI/CD. Ele foi renomeado para
+DocAssist quando o foco passou a ser o RAG. Os endpoints de NLP continuam na versão local
+(`/nlp/...`). O planejamento completo, fase por fase, está em
+[`docs/escopo.md`](docs/escopo.md).
+
+---
+
+## 👤 Autora
 
 **Aline Lima**
 
-- 🐙 GitHub: [@Aline12Lima](https://github.com/Aline12Lima)
-- 💼 LinkedIn: [Aline Lima] (https://www.linkedin.com/in/aline-lima-397a84202/)
-- 🐋 Docker Hub: [@aline12limaai](https://hub.docker.com/u/aline12limaai)
+- GitHub: [@Aline12Lima](https://github.com/Aline12Lima)
+- LinkedIn: [Aline Lima](https://www.linkedin.com/in/aline-lima-397a84202/)
 
----
-
-<div align="center">
-
-**Se este projeto te inspirou ou ajudou, considere dar uma ⭐!**
-
-Construído com ☕ + muita persistência através de bugs reais em produção.
-
-</div>
+Licença MIT.
